@@ -3,9 +3,11 @@
  */
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/vmalloc.h>
 #include <linux/errno.h> /* error codes */
 #include <linux/proc_fs.h> /* We are making a procfs entry */
 #include <asm/uaccess.h> /* gives us get/put_user functions */
+#include "constants.h"
 #include "data_structures.h"
 
 MODULE_LICENSE("GPL");
@@ -49,7 +51,9 @@ static int __init initialization_routine(void) {
 }
 
 static void __exit cleanup_routine(void) {
-  printk(KERN_INFO "Dumping module\n");
+  printk(KERN_INFO "Dumping ramdisk module\n");
+  if (super_block != NULL)
+    vfree(super_block);
   remove_proc_entry("ramdisk", NULL);
 
   return;
@@ -67,7 +71,7 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   case RD_INIT:
     if (super_block != NULL)
       return -EALREADY;
-    super_block = 
+    super_block = (super_block_t *) vmalloc(RD_SZ);
     /* ptr = vmalloc(2mb); */
     /* super_block = ptr; */
     /* index_nodes = ptr + BLK_SZ; */

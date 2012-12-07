@@ -1,3 +1,6 @@
+#ifndef DATA_STRUCTURES_H
+#define DATA_STRUCTURES_H
+#include "constants.h"
 typedef struct rd_super_block {
   int num_free_blocks;
   int num_free_inodes;
@@ -32,3 +35,4 @@ typedef struct directory_entry {
 
 /* Directory -block- has BLK_SZ / sizeof(directory_entry_t)
    directory entries == 16 entries */
+#endif
