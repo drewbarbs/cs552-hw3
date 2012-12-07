@@ -7,5 +7,7 @@
 #define DIRECT 8
 #define PTR_SZ 4
 #define PTRS_PB (BLK_SZ / PTR_SZ)
-
+#define NUM_BLKS_INODE 256
+#define INODE_SZ 64
+#define NUM_BLKS_BITMAP 4
 #endif

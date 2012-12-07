@@ -7,12 +7,11 @@
 #include <linux/errno.h> /* error codes */
 #include <linux/proc_fs.h> /* We are making a procfs entry */
 #include <asm/uaccess.h> /* gives us get/put_user functions */
+#include "ramdisk_module.h"
 #include "constants.h"
 #include "data_structures.h"
 
 MODULE_LICENSE("GPL");
-
-#define RD_INIT 1
 
 static super_block_t *super_block = NULL;
 static index_node_t *index_nodes = NULL; // 256 blocks/64 bytes per inode = 1024 inodes
@@ -52,9 +51,11 @@ static int __init initialization_routine(void) {
 
 static void __exit cleanup_routine(void) {
   printk(KERN_INFO "Dumping ramdisk module\n");
-  if (super_block != NULL)
+  if (super_block != NULL) {
+    printk(KERN_INFO "Freeing ramdisk memory\n");
     vfree(super_block);
-  remove_proc_entry("ramdisk", NULL);
+  }
+   remove_proc_entry("ramdisk", NULL);
 
   return;
 }
@@ -65,20 +66,22 @@ static void __exit cleanup_routine(void) {
 static int ramdisk_ioctl(struct inode *inode, struct file *filp,
 			       unsigned int cmd, unsigned long arg) 
 {
-  char input = '\0';
+  printk("Called ioctl\n");
   switch (cmd) {
 
   case RD_INIT:
     if (super_block != NULL)
       return -EALREADY;
+    printk(KERN_INFO "Initializing ramdisk\n");
     super_block = (super_block_t *) vmalloc(RD_SZ);
-    /* ptr = vmalloc(2mb); */
-    /* super_block = ptr; */
-    /* index_nodes = ptr + BLK_SZ; */
-    /* block_bitmap = (ptr + BLK_SZ) + 256 * BLK_SZ; // = index_nodes + 256 * BLK_SZ */
-    /* data_blocks = (ptr + BLK_SZ) + 256 * BLK_SZ + 4 * BLK_SZ; // = block_bitmap + 4 * BLK_SZ */
-
-
+    if (!super_block) {
+      printk(KERN_ERR "vmalloc for ramdisk space failed\n");
+      return -ENOMEM;
+    }
+    index_nodes = (index_node_t *) ((void *) super_block + BLK_SZ);
+    block_bitmap = ((void *)index_nodes + NUM_BLKS_INODE * INODE_SZ);
+    data_blocks = block_bitmap + NUM_BLKS_BITMAP * BLK_SZ;
+    break;
  default:
     return -EINVAL;
   }
