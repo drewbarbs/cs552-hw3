@@ -1,16 +1,10 @@
-#define MAX_FILES 1023
-#define BLK_SZ 256
-#define DIRECT 8
-#define PTR_SZ 4
-#define PTRS_PB (BLK_SZ / PTR_SZ)
-
-typedef struct super_block {
+typedef struct rd_super_block {
   int num_free_blocks;
   int num_free_inodes;
   /* Additional info? (struct can be as large as BLK_SZ bytes) */
 } super_block_t;
 
-enum FILE_TYPE {
+typedef enum FILE_TYPE {
   dir,
   reg
 } file_type_t;
@@ -21,7 +15,7 @@ typedef struct indirect_block {
 
 typedef struct double_indirect_block_t {
   indirect_block_t *indirect_blocks[PTRS_PB];
-} indirect_block_t;
+} double_indirect_block_t;
 
 typedef struct index_node {
   file_type_t type;

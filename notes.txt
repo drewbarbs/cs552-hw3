@@ -1,0 +1,5 @@
+-Number of data blocks (7931) computed as:
+	(0x200000(2mb) - 0x100 (super block) - 0x10000 (256 inode blocks) - 0x400 (4 blocks for bitmap) ) / 0x100 (block size)
+
+-We were beaten to the name "struct super_block" by the linux kernel developers; it's already defined in linux/fs.h
+
