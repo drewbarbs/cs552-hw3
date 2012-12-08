@@ -1,4 +1,10 @@
 #include <stdlib.h>
+#ifdef DEBUG
+#include <string.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+#endif
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/ioctl.h>
@@ -29,3 +35,47 @@ int rd_creat(char *pathname)
   
   return 0;
 }
+
+#ifdef DEBUG
+
+#ifdef MULTI_THREAD
+pthread_t t1;
+pthread_t t2;  
+pthread_attr_t attr1;
+pthread_attr_t attr2;
+#endif
+
+void thread_func(void *arg)
+{
+  printf("Thread %d about to open ramdisk\n", (int) arg);
+  int fd;
+  fd = open("/proc/ramdisk", 0);
+  printf("Thread %d about to close ramdisk\n", (int) arg);
+  close(fd);
+  while (1) {}
+  return;
+}
+int main(int argc, char *argv[])
+{
+  rd_init();
+#ifdef MULTI_THREAD
+  pthread_attr_init(&attr1);
+  pthread_attr_init(&attr2);
+  pthread_create(&t1, &attr1, thread_func, 1);
+  pthread_create(&t2, &attr2, thread_func, 2);
+#endif
+  printf("My pid: %d\n", getpid());
+  if (argc > 1 && strcmp(argv[1], "c") == 0)
+    ioctl(fd, DBG_MK_FDT, NULL);  
+  else if (argc > 1 && strcmp(argv[1], "d") == 0) {
+    ioctl(fd, DBG_RM_FDT, atoi(argv[2]));
+  }else if (argc > 1 && strcmp(argv[1], "p") == 0)
+    ioctl(fd, DBG_PRINT_FDT_PIDS, NULL);
+  else
+    printf("Usage: ./a.out [cdp] <pid> (only if deleting)\n");
+  
+  pthread_exit(0);
+  /*while (1) {}  */
+      return 0;
+}
+#endif

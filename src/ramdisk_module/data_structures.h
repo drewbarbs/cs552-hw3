@@ -25,10 +25,11 @@ typedef struct double_indirect_block_t {
 typedef struct index_node {
   file_type_t type;
   int size;
+  rwlock_t file_lock; // sizeof(rwlock_t) == 4
   void *direct[DIRECT];
   indirect_block_t *single_indirect;
   double_indirect_block_t *double_indirect;
-} index_node_t;
+} index_node_t; //sizeof(index_node_t) == 52
 
 typedef struct directory_entry {
   char *filename; /* 14 bytes including null terminator */
@@ -36,8 +37,8 @@ typedef struct directory_entry {
 } directory_entry_t;
 
 typedef struct file_object {
-  off_t file_position;
   index_node_t *index_node;
+  off_t file_position;
 } file_object_t;
 
 /* file_descriptor_table_t should be an -opaque- type */

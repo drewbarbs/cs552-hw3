@@ -1,5 +1,8 @@
 -Number of data blocks (7931) computed as:
 	(0x200000(2mb) - 0x100 (super block) - 0x10000 (256 inode blocks) - 0x400 (4 blocks for bitmap) ) / 0x100 (block size)
+- Current implementation allows multiple threads to open file descriptors, but does not carry file descriptors -across- processes,
+  or fork'd children. In order to go in this direction, could leverage pthread_t tgid (thread group id), and check for parents
+  of processes when looking for file descriptor table.
 
 -We were beaten to the name "struct super_block" by the linux kernel developers; it's already defined in linux/fs.h
 
@@ -8,8 +11,12 @@ Synchronization Primitives:
 	- currently have rw_lock_t protecting the index_nodes and data_blocks arrays, could make locking finer grained for better write performance
 
 TODO:
+-Making the ramdisk threadsafe:
+	- add fdt-level locks: need to be held for remove fdt/table, add entry, set entry
+	- add locks to each inode, remove data_blocks lock
 -add helper functions
      // In the following, a file descriptor is an unsigned short
      file_descriptor create_entry(fdt, index_node_t *inode) // returns index into file descriptor table
      file_object_t   get_entry(fdt, file_descriptor)
      int 	     remove_entry(fdt, file_descriptor) //returns number of entries remaining in file descriptor table (after removal)
+     int	     set_entry(fdt, file_descriptor, file_object_t);
