@@ -37,12 +37,12 @@ static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 
 /* *** Declarations of ramdisk synchronization data *** */
 
-/* rd_init_lock protects critical section of rd_init(), ensures ramdisk is initialized
+/* rd_init_rwlock protects critical section of rd_init(), ensures ramdisk is initialized
    only once */
-DEFINE_SPINLOCK(rd_init_spinlock);
+DEFINE_RWLOCK(rd_init_rwlock);
 /* Locks to ensure consistent view of ramdisk memory */
 DEFINE_SPINLOCK(super_block_spinlock);
-DEFINE_SPINLOCK(block_bitmap_rwlock);
+DEFINE_SPINLOCK(block_bitmap_spinlock);
 DEFINE_RWLOCK(index_nodes_rwlock);
 DEFINE_RWLOCK(data_blocks_rwlock);
 DEFINE_RWLOCK(file_descriptor_tables_rwlock);
@@ -169,6 +169,7 @@ static int create_file_descriptor_table(pid_t pid)
   write_unlock(&file_descriptor_tables_rwlock);
   return 0;
 }
+
 /*
   Get a pointer to the file descriptor table owned associated with pid
   returns NULL if no such table exists
@@ -186,6 +187,7 @@ static file_descriptor_table_t *get_file_descriptor_table(pid_t pid)
   read_unlock(&file_descriptor_tables_rwlock);  
   return target;
 }
+
 /*
   Removes the file descripor table associated with pid
  */
@@ -200,37 +202,46 @@ static void remove_file_descriptor_table(pid_t pid) {
   write_unlock(&file_descriptor_tables_rwlock);
 }
 
+/**
+ *
+ * Functions for implementing the ramdisk API
+ *
+ */
+
+/* returns a boolean value indicating whether ramdisk is ready for use */
+bool rd_initialized() 
+{
+  bool ret;
+  read_lock(&rd_init_rwlock);
+  ret = super_block != NULL;
+  read_unlock(&rd_init_rwlock);
+  return ret;
+}
 
 /* Initializaton routine must be called once to initialize ramdisk memory before
    other functions are called. 
    return 0 on success, an errno otherwise */
 int rd_init()
 {
-  spin_lock(&rd_init_spinlock);
-  if (super_block != NULL) {
-    spin_unlock(&rd_init_spinlock);
+  if (rd_initialized()) {
     return -EALREADY;
   }
+  write_lock(&rd_init_rwlock);
   printk(KERN_INFO "Initializing ramdisk\n");
   super_block = (super_block_t *) vmalloc(RD_SZ);
   if (!super_block) {
     printk(KERN_ERR "vmalloc for ramdisk space failed\n");
-    spin_unlock(&rd_init_spinlock);
+    write_unlock(&rd_init_rwlock);
     return -ENOMEM;
   }
   memset((void *) super_block, 0, RD_SZ);
   index_nodes = (index_node_t *) ((void *) super_block + BLK_SZ);
   block_bitmap = ((void *)index_nodes + NUM_BLKS_INODE * INODE_SZ);
   data_blocks = block_bitmap + NUM_BLKS_BITMAP * BLK_SZ;
-  spin_unlock(&rd_init_spinlock);  
+  write_unlock(&rd_init_rwlock);  
   return 0;
 }
 
-/* returns a boolean value indicating whether ramdisk is ready for use */
-bool rd_initialized() 
-{
-  return super_block != NULL;
-}
 
 module_init(initialization_routine);
 module_exit(cleanup_routine);
