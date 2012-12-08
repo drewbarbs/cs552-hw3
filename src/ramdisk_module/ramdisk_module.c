@@ -2,12 +2,13 @@
  * Ramdisk module
  */
 #include <linux/module.h>
+#include <linux/proc_fs.h> /* We are making a procfs entry */
+#include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/init.h>
 #include <linux/vmalloc.h>
 #include <linux/spinlock.h>
 #include <linux/errno.h> /* error codes */
-#include <linux/proc_fs.h> /* We are making a procfs entry */
 #include <asm/uaccess.h> /* gives us get/put_user functions */
 #include "ramdisk_module.h"
 #include "constants.h"
@@ -21,6 +22,18 @@ static int rd_init(void);
 static int ramdisk_ioctl(struct inode *inode, struct file *filp, 
 			 unsigned int cmd, unsigned long arg);
 static bool rd_initialized(void);
+static int  create_file_descriptor_table(pid_t pid);
+static file_descriptor_table_t *get_file_descriptor_table(pid_t pid);
+static void remove_file_descriptor_table(pid_t pid);
+
+static int create_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+							 file_object_t fo);
+static file_object_t *get_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+						     unsigned short fd);
+static void remove_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+					       unsigned short fd);
+static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
+					     unsigned short fd);
 
 /* *** Declarations of ramdisk synchronization data *** */
 
@@ -51,8 +64,14 @@ static struct proc_dir_entry *proc_entry;
 
 /* (directory_entry_t *) data_blocks */
 
+/**
+ *
+ *  Functions for setting up the /proc file system entry
+ *
+ * 
+ */
 static int __init initialization_routine(void) {
-  printk(KERN_INFO "Loading module\n");
+  printk(KERN_INFO "Loading ramdisk module\n");
 
   ramdisk_file_ops.ioctl = ramdisk_ioctl;
 
@@ -69,7 +88,7 @@ static int __init initialization_routine(void) {
 }
 
 static void __exit cleanup_routine(void) {
-  printk(KERN_INFO "Dumping ramdisk module\n");
+  printk(KERN_INFO "Cleaning up ramdisk module\n");
   if (super_block != NULL) {
     printk(KERN_INFO "Freeing ramdisk memory\n");
     vfree(super_block);
@@ -101,6 +120,87 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   return 0;
 }
 
+/**
+ *
+ *  Functions for working with ramdisk data structures
+ *
+ * 
+ */
+
+/* *** File descriptor table functions***  */
+
+/*
+  Create a file descriptor table for the process identified by pid.
+  returns 0 on success, -errno on error;
+*/
+static int create_file_descriptor_table(pid_t pid)
+{
+  file_descriptor_table_t *fdt = NULL;
+  file_object_t *entries = NULL;
+
+  /* Check if a file descriptor table for this process already exists */
+  if (get_file_descriptor_table(pid) != NULL) {
+    printk(KERN_ERR "Attempted to create fdt for process %d that already has one\n", pid);
+    return -EEXIST;
+  }
+  
+  /* Allocate memory for the new file descriptor table, return on failure */
+  fdt = (file_descriptor_table_t *) kmalloc(sizeof(file_descriptor_table_t), GFP_KERNEL);
+  if (fdt == NULL) {
+    printk(KERN_ERR "Failed to allocate fdt for process %d\n", pid);
+    return -ENOMEM;
+  }
+  entries = (file_object_t *) kmalloc(sizeof(file_object_t) * INIT_FDT_LEN, GFP_KERNEL);
+  if (entries == NULL) {
+    printk(KERN_ERR "Failed to allocate entries array for fdt for process %d\n", pid);
+    kfree(fdt);
+    return -ENOMEM;
+  }
+
+  /* Initialize new file descriptor table */
+  fdt->owner = pid;
+  fdt->entries = entries;
+  fdt->entries_length = INIT_FDT_LEN;
+  fdt->num_free_entries = INIT_FDT_LEN;
+
+  /* Insert new fdt into file_descriptor_tables_list */
+  write_lock(&file_descriptor_tables_rwlock);
+  list_add(&fdt->list, &file_descriptor_tables);
+  write_unlock(&file_descriptor_tables_rwlock);
+  return 0;
+}
+/*
+  Get a pointer to the file descriptor table owned associated with pid
+  returns NULL if no such table exists
+ */
+static file_descriptor_table_t *get_file_descriptor_table(pid_t pid)
+{
+  file_descriptor_table_t *p = NULL, *target = NULL;
+  read_lock(&file_descriptor_tables_rwlock);
+  list_for_each_entry(p, &file_descriptor_tables, list) {
+    if (p->owner == pid) {
+      target = p;
+      break;
+    }
+  }
+  read_unlock(&file_descriptor_tables_rwlock);  
+  return target;
+}
+/*
+  Removes the file descripor table associated with pid
+ */
+static void remove_file_descriptor_table(pid_t pid) {
+  file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
+  if (fdt == NULL) {
+    printk(KERN_ERR "Attampted to remove nonexistant fdt for process %d\n", pid);
+    return;
+  }
+  write_lock(&file_descriptor_tables_rwlock);
+  list_del(&fdt->list);
+  write_unlock(&file_descriptor_tables_rwlock);
+}
+
+
 /* Initializaton routine must be called once to initialize ramdisk memory before
    other functions are called. 
    return 0 on success, an errno otherwise */
@@ -131,9 +231,6 @@ bool rd_initialized()
 {
   return super_block != NULL;
 }
-
-
-
 
 module_init(initialization_routine);
 module_exit(cleanup_routine);

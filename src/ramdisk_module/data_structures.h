@@ -45,8 +45,8 @@ typedef struct file_descriptor_table {
   struct list_head list;
   file_object_t *entries;
   pid_t owner; //pid of the process the fdt belongs to
-  size_t total_num_entries;
-  size_t num_entries_assigned;
+  size_t entries_length;
+  size_t num_free_entries;
 } file_descriptor_table_t;
 
 /* Directory -block- has BLK_SZ / sizeof(directory_entry_t)
