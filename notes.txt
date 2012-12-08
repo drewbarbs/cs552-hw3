@@ -7,3 +7,15 @@ Synchronization Primitives:
 	- spinlocks protect rd_init(), the super_block, and block bitmap, since these locks will be held for only sort period of time
 	- currently have rw_lock_t protecting the index_nodes and data_blocks arrays, could make locking finer grained for better write performance
 
+TODO:
+-add helper functions for getting a processes' fdt by pid (and creating it if it doesn't exist), 
+     fdt *get_fdt(pid_t pid);
+     void create_fdt(pid_t pid);
+     void remove_fdt(pid);
+     
+     // In the following, a file descriptor is an unsigned short
+     file_descriptor create_entry(fdt, index_node_t *inode) // returns index into file descriptor table
+     file_object_t   get_entry(fdt, file_descriptor)
+     int 	     remove_entry(fdt, file_descriptor) //returns number of entries remaining in file descriptor table (after removal)
+     
+     

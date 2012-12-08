@@ -1,6 +1,8 @@
 #ifndef DATA_STRUCTURES_H
 #define DATA_STRUCTURES_H
+#include <linux/list.h>
 #include "constants.h"
+
 typedef struct rd_super_block {
   int num_free_blocks;
   int num_free_inodes;
@@ -32,6 +34,20 @@ typedef struct directory_entry {
   char *filename; /* 14 bytes including null terminator */
   unsigned short index_node_number; // 2 bytes
 } directory_entry_t;
+
+typedef struct file_object {
+  off_t file_position;
+  index_node_t *index_node;
+} file_object_t;
+
+/* file_descriptor_table_t should be an -opaque- type */
+typedef struct file_descriptor_table {
+  struct list_head list;
+  file_object_t *entries;
+  pid_t owner; //pid of the process the fdt belongs to
+  size_t total_num_entries;
+  size_t num_entries_assigned;
+} file_descriptor_table_t;
 
 /* Directory -block- has BLK_SZ / sizeof(directory_entry_t)
    directory entries == 16 entries */

@@ -32,12 +32,14 @@ DEFINE_SPINLOCK(super_block_spinlock);
 DEFINE_SPINLOCK(block_bitmap_rwlock);
 DEFINE_RWLOCK(index_nodes_rwlock);
 DEFINE_RWLOCK(data_blocks_rwlock);
+DEFINE_RWLOCK(file_descriptor_tables_rwlock);
 
 /* Declarations of ramdisk data structures */
 static super_block_t *super_block = NULL;
 static index_node_t *index_nodes = NULL; // 256 blocks/64 bytes per inode = 1024 inodes
 static void *block_bitmap = NULL; // 4 blocks => block_bitmap is 1024 bytes long
 static void *data_blocks = NULL; // len(data_blocks) == 7931 blocks
+static LIST_HEAD(file_descriptor_tables);
 static struct file_operations ramdisk_file_ops;
 static struct proc_dir_entry *proc_entry;
 
@@ -129,6 +131,9 @@ bool rd_initialized()
 {
   return super_block != NULL;
 }
+
+
+
 
 module_init(initialization_routine);
 module_exit(cleanup_routine);
