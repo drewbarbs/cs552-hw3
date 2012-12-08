@@ -24,9 +24,8 @@ int rd_init()
 
 int rd_creat(char *pathname)
 {
-  
   if (rd_init() < 0)
     return -1;
-
+  
   return 0;
 }

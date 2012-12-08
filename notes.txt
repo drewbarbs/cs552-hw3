@@ -3,3 +3,7 @@
 
 -We were beaten to the name "struct super_block" by the linux kernel developers; it's already defined in linux/fs.h
 
+Synchronization Primitives:
+	- spinlocks protect rd_init(), the super_block, and block bitmap, since these locks will be held for only sort period of time
+	- currently have rw_lock_t protecting the index_nodes and data_blocks arrays, could make locking finer grained for better write performance
+

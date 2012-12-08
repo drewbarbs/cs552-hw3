@@ -30,7 +30,7 @@ typedef struct index_node {
 
 typedef struct directory_entry {
   char *filename; /* 14 bytes including null terminator */
-  unsigned short index_node_num; // 2 bytes
+  unsigned short index_node_number; // 2 bytes
 } directory_entry_t;
 
 /* Directory -block- has BLK_SZ / sizeof(directory_entry_t)
