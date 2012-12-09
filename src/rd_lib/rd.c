@@ -58,6 +58,11 @@ void thread_func(void *arg)
 }
 int main(int argc, char *argv[])
 {
+
+#ifdef FORK
+  pid_t child;
+#endif  
+
 #ifdef MULTI_THREAD
   pthread_attr_init(&attr1);
   pthread_attr_init(&attr2);
@@ -65,8 +70,18 @@ int main(int argc, char *argv[])
   pthread_create(&t2, &attr2, thread_func, 2);
   sleep(2);
 #endif
+  printf("My pid: %d, parent pid: %d, process group id: %d \nAbout to rd_init()\n", getpid(), getppid(),getpgrp());  
+
   rd_init();
-  printf("My pid: %d\n", getpid());
+
+#ifdef FORK
+  if ((child = fork()) == 0) {
+    printf("In child with pid: %d, parent pid: %d, process group id: %d \nAbout to close()\n", getpid(), getppid(),getpgrp());
+    close(fd);
+  } else {
+
+
+#endif
   if (argc > 1 && strcmp(argv[1], "c") == 0)
     ioctl(fd, DBG_MK_FDT, NULL);  
   else if (argc > 1 && strcmp(argv[1], "d") == 0) {
@@ -78,6 +93,9 @@ int main(int argc, char *argv[])
   
   pthread_exit(0);
   /*while (1) {}  */
+#ifdef FORK
+  }
+#endif
       return 0;
 }
 #endif
