@@ -10,8 +10,12 @@ typedef struct rd_super_block {
 } super_block_t;
 
 typedef enum FILE_TYPE {
-  dir,
-  reg
+  UNALLOCATED,
+  ALLOCATED, /* Intermediary stage inode is in when
+	      * obtained by rd_creat or rd_mkdir
+	      * functions */
+  DIR,
+  REG
 } file_type_t;
 
 typedef struct indirect_block {

@@ -35,7 +35,7 @@ typedef struct rd_readdir_arg {
 #define RD_LSEEK _IOW(MAJOR_NUM, 7, struct rd_seek_arg)
 #define RD_UNLINK _IOW(MAJOR_NUM, 8, char *)
 #define RD_READDIR _IOWR(MAJOR_NUM, 9, char *)
-#define DBG_PRINT_FDT_PIDS _IO(MAJOR_NUM, 0 + 1)
-#define DBG_MK_FDT _IO(MAJOR_NUM, 0 + 2)
-#define DBG_RM_FDT _IO(MAJOR_NUM, 0 + 3)
+#define DBG_PRINT_FDT_PIDS _IO(MAJOR_NUM, 9 + 1)
+#define DBG_MK_FDT _IO(MAJOR_NUM, 9 + 2)
+#define DBG_RM_FDT _IO(MAJOR_NUM, 9 + 3)
 #endif

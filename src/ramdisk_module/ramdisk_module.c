@@ -36,8 +36,18 @@ static void delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 					       unsigned short fd);
 static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 					     unsigned short fd);
+static index_node_t *get_free_index_node(void);
 /* Routines for implementing ramdisk API */
-static int rd_creat(char *usr_str);
+static int rd_creat(const char *usr_str);
+static int rd_mkdir(const char *usr_str);
+static int rd_open(const pid_t pid, const char *usr_str);
+static int rd_close(const pid_t pid, const int fd);
+static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg);
+static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg);
+static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg);
+static int rd_unlink(const char *usr_str);
+static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg);
+
 /* *** Debug Functions *** */
 static void debug_print_fdt_pids(void);
 
@@ -108,7 +118,13 @@ static int procfs_close(struct inode *inode, struct file *file)
 }
 static int __init initialization_routine(void) {
   printk(KERN_INFO "Loading ramdisk module\n");
-
+  char tokenize_char_arr[] = {"/drew/documents/file"};
+  char *to_print = NULL, tokenize = tokenize_char_arr;
+  printk(KERN_INFO "About to tokenize \"/drew/documents/file\"\n");
+  while ((to_print = strsep(&tokenize, "/")) != NULL) {
+      printk("%s\n", to_print);
+    }
+  
   ramdisk_file_ops.ioctl = ramdisk_ioctl;
 
   /* Start create proc entry */
@@ -119,6 +135,8 @@ static int __init initialization_routine(void) {
   }
   proc_entry->proc_fops = &ramdisk_file_ops;
 
+
+  
   /* Check we have our sizes right */
   /* printk("BLK_SZ: %d, sizeof(directory_entry_t): %d, BLK_SZ/sizeof(director_entry_t): %d\n", */
   /* 	 BLK_SZ, sizeof(directory_entry_t), BLK_SZ/ sizeof(directory_entry_t)); */
@@ -380,6 +398,45 @@ static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
   return fdt_size;
 }
 
+/* Returns a pointer to a free index_node_t, if one exists,
+   NULL on error
+*/
+static index_node_t *get_free_index_node()
+{
+  int i = 0;
+  index_node_t *new_inode = NULL, *p = NULL;
+  /* Make sure there is a free inode/ decrement inodes counter in
+   * superblock
+   */
+  spin_lock(&super_block_spinlock);
+  if (super_block->num_free_inodes == 0) {
+    spin_unlock(&super_block_spinlock);
+    return NULL;
+  }
+  super_block->num_free_inodes--;
+  spin_unlock(&super_block_spinlock);
+  /* Look for an UNALLOCATED inode */
+  for (i = 0; i < NUM_INODES; i++) {
+    p = (index_node_t *) ((void *) index_nodes + 64 * i);
+    if (write_trylock(&p->file_lock)) {
+      if (p->type == UNALLOCATED) {
+	new_inode = p;
+	new_inode->type = ALLOCATED;
+	write_unlock(&new_inode->file_lock);
+	break;
+      } else
+	write_unlock(&p->file_lock);
+    }
+  }
+  /* We should have been able to find such an inode */
+  if (new_inode == NULL) {
+    printk(KERN_ERR "get_free_index_node failed to find free inode,"
+	   " despite having first checked the super block counter\n");
+  }
+
+  return new_inode;
+}
+
 /**
  *
  * Functions for implementing the ramdisk API
@@ -403,7 +460,7 @@ int rd_init()
 {
   const super_block_t init_super_block = {.num_free_blocks = NUM_BLKS_DATA,
 					  .num_free_inodes = NUM_BLKS_INODE*BLK_SZ/INODE_SZ};
-  const index_node_t root_inode = { .type = dir,
+  const index_node_t root_inode = { .type = DIR,
 				    .size = 0,
 				    .file_lock = RW_LOCK_UNLOCKED,
 				    .direct = { NULL },
@@ -431,7 +488,43 @@ int rd_init()
   return 0;
 }
 
+/*
+ * Returns the index node corresponding to the directory
+ * containing the file indicated by pathname, or NULL
+ * on error
+ */
+static index_node_t *get_parent_index_node(char *pathname)
+{
+  
 
+}
+static int rd_creat(const char *usr_str)
+{
+  int status = 0;
+  index_node_t *new_inode = NULL;
+  char new_path_name[MAX_FILE_NAME_LEN] = { '\0' };
+  size_t usr_str_len = strnlen_user(usr_str, MAX_FILE_NAME_LEN);
+  if (usr_str_len == 0 || !access_ok(VERIFY_READ, usr_str, MAX_FILE_NAME_LEN))
+    return -EINVAL;
+  /* Make sure there is a free inode/ decrement inodes counter in
+   * superblock
+   */
+  new_inode = get_free_index_node();
+  if (new_inode == NULL)
+    return -ENOMEM;
+  strncpy_from_user(new_path_name, usr_str, MAX_FILE_NAME_LEN);
+  /* parent_inode = get_parent_index_node(new_path_name); */
+
+  /* parent_inode->size += sizeof(directory_entry_t); */
+  
+
+  if (status <= 0)
+    return status;
+  
+
+  
+  return 0;
+}
 
 module_init(initialization_routine);
 module_exit(cleanup_routine);
