@@ -1,17 +1,34 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "rd.h"
 
 int main() {
-  char tokenize_me[] = {"/drew/documents/file"};
+  /* char tokenize_me[] = {"/drew/documents/file"}; */
   char *to_print = NULL;
-  char *tokenize = tokenize_me;
-  printf("About to tokenize \"/drew/documents/file\"\n");
+
+  char pathname[] = "/dir/doc/file";
+  const char *pathname_copy = pathname;
+  char *tokenize = pathname_copy + 1;
+  /* char *pathname_copy = calloc(strlen(pathname) + 1, sizeof(char)); */
+  /* strncpy(pathname_copy, pathname, strlen(pathname) - strlen(strrchr(pathname, '/'))); */
   while ((to_print = strsep(&tokenize, "/")) != NULL) {
       printf("%s\n", to_print);
     }
-  strcpy(tokenize_me, "new string");
-  printf("%s\n", tokenize_me);
+  //  printf("%s\n", pathname_copy);
   printf("Finished\n");
   return 0;
 }
+
+
+for (i = 0; i < current->size / sizeof(directory_entry_t); i++) {
+  if (i % DIR_ENTRIES_PB == 0) {
+    if (i < DIRECT * DIR_ENTRIES_PB) {
+      block_ptr = current->direct[i/DIR_ENTRIES_PB];
+    }
+  }
+  block_ptr[i];
+
+
+  
+ }

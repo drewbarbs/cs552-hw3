@@ -3,6 +3,12 @@
 #include <linux/list.h>
 #include "constants.h"
 
+typedef struct offset_info {
+  void *block_start;
+  void *data_start;
+  void *block_end;
+} offset_info_t;
+
 typedef struct rd_super_block {
   int num_free_blocks;
   int num_free_inodes;

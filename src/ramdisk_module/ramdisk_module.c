@@ -37,6 +37,16 @@ static void delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 					     unsigned short fd);
 static index_node_t *get_free_index_node(void);
+//static void release_index_node(index_node_t *inode);
+static index_node_t *get_parent_index_node(const char *pathname); // DOESNT TRASH PATHNAME
+static index_node_t *get_index_node(const char *pathname);
+static void *get_free_data_block(void);
+static void release_data_block(void *data_block_ptr);
+static void release_all_data_blocks(index_node_t *index_node);
+static int add_directory_entry(index_node_t *parent_inode,
+				directory_entry_t new_entry); /* Insert directory entry,
+								 add increment size */
+static offset_info_t get_offset_info(index_node_t *inode, int offset);
 /* Routines for implementing ramdisk API */
 static int rd_creat(const char *usr_str);
 static int rd_mkdir(const char *usr_str);
@@ -69,7 +79,6 @@ DEFINE_RWLOCK(rd_init_rwlock);
 DEFINE_SPINLOCK(super_block_spinlock);
 DEFINE_SPINLOCK(block_bitmap_spinlock);
 DEFINE_RWLOCK(index_nodes_rwlock);
-//DEFINE_RWLOCK(data_blocks_rwlock);
 DEFINE_RWLOCK(file_descriptor_tables_rwlock);
 
 /* Declarations of ramdisk data structures */
@@ -80,12 +89,6 @@ static void *block_bitmap = NULL; // 4 blocks => block_bitmap is 1024 bytes long
 static void *data_blocks = NULL; // len(data_blocks) == 7931 blocks
 static LIST_HEAD(file_descriptor_tables);
 
-/* directory_entry_t * root_dir_p = (directory_entry_t *) (data_blocks + block_num * BLK_SZ); */
-/* directory_entry_t first_entry = root_dir_p[0]; */
-/* char *first_filename = first_entry */
-
-
-/* (directory_entry_t *) data_blocks */
 
 /**
  *
@@ -118,12 +121,6 @@ static int procfs_close(struct inode *inode, struct file *file)
 }
 static int __init initialization_routine(void) {
   printk(KERN_INFO "Loading ramdisk module\n");
-  char tokenize_char_arr[] = {"/drew/documents/file"};
-  char *to_print = NULL, tokenize = tokenize_char_arr;
-  printk(KERN_INFO "About to tokenize \"/drew/documents/file\"\n");
-  while ((to_print = strsep(&tokenize, "/")) != NULL) {
-      printk("%s\n", to_print);
-    }
   
   ramdisk_file_ops.ioctl = ramdisk_ioctl;
 
@@ -134,16 +131,6 @@ static int __init initialization_routine(void) {
     return 1;
   }
   proc_entry->proc_fops = &ramdisk_file_ops;
-
-
-  
-  /* Check we have our sizes right */
-  /* printk("BLK_SZ: %d, sizeof(directory_entry_t): %d, BLK_SZ/sizeof(director_entry_t): %d\n", */
-  /* 	 BLK_SZ, sizeof(directory_entry_t), BLK_SZ/ sizeof(directory_entry_t)); */
-  /* printk("Super block size: %d\n", sizeof(super_block_t)); */
-  /* printk("Indirect block size: %d\n", sizeof(indirect_block_t)); */
-  /* printk("Double indirect block size: %d\n", sizeof(double_indirect_block_t)); */
-  /* printk("Max Single File Size: %d\n", MAX_FILE_SIZE); */
 
   return 0;
 }
@@ -189,6 +176,9 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   switch (cmd) {
   case RD_INIT:
     return rd_init();
+  case RD_CREAT:
+    //
+    break;
   case DBG_PRINT_FDT_PIDS:
     debug_print_fdt_pids();
     break;
@@ -437,6 +427,60 @@ static index_node_t *get_free_index_node()
   return new_inode;
 }
 
+/* static void release_free_index_node(index_node_t *inode) */
+/* { */
+  
+/* } */
+
+static index_node_t *get_index_node(const char *pathname)
+{
+  const char *pathname_copy;
+  char *token, *tokenize;
+  index_node_t *current = index_nodes, *parent = NULL;
+  if (strlen(pathname) == 0)
+    return NULL;
+  if (strlen(pathname) == 1 && pathname[0] == '/')
+    return index_nodes; // Points to root index node
+  
+  pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
+  strncpy(pathname_copy, pathname, strlen(pathname));
+  tokenize = pathname_copy + 1;
+  while ((token = strsep(&tokenize, "/")) != NULL) {
+    if (current->type != DIR) {
+      parent = NULL;
+      break;
+    }
+    for (i = 0; i < current->size / sizeof(directory_entry_t); i++) {
+      
+    }
+
+    
+  }
+
+  kfree(pathname_copy);
+}
+
+
+/*
+ * Returns the index node of directory containing the file
+ * indicated by pathname, or NULL on error.
+ *
+ * IMPORTANT: pathname should be a string in kernel space
+ */
+static index_node_t *get_parent_index_node(const char *pathname)
+{
+  char *pathname_copy;
+  char *token;
+  index_node_t *parent;
+  
+  pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
+  strncpy(pathname_copy, pathname, strlen(pathname) - strlen(strrchr(pathname, '/')));
+
+  parent = get_index_node(pathname_copy);
+  kfree(pathname_copy);
+  return parent;
+}
+
 /**
  *
  * Functions for implementing the ramdisk API
@@ -495,34 +539,71 @@ int rd_init()
  */
 static index_node_t *get_parent_index_node(char *pathname)
 {
-  
-
+  return index_nodes; /*TODO */
 }
 static int rd_creat(const char *usr_str)
 {
-  int status = 0;
-  index_node_t *new_inode = NULL;
-  char new_path_name[MAX_FILE_NAME_LEN] = { '\0' };
-  size_t usr_str_len = strnlen_user(usr_str, MAX_FILE_NAME_LEN);
-  if (usr_str_len == 0 || !access_ok(VERIFY_READ, usr_str, MAX_FILE_NAME_LEN))
-    return -EINVAL;
-  /* Make sure there is a free inode/ decrement inodes counter in
-   * superblock
-   */
-  new_inode = get_free_index_node();
-  if (new_inode == NULL)
-    return -ENOMEM;
-  strncpy_from_user(new_path_name, usr_str, MAX_FILE_NAME_LEN);
+  /* int status = 0, i = 0; */
+  /* index_node_t *new_inode = NULL; */
+  /*   directory_entry_t *cur_dir_entry; */
+  /* char new_path_name[MAX_FILE_NAME_LEN] = { '\0' }; */
+  /* size_t usr_str_len = strnlen_user(usr_str, MAX_FILE_NAME_LEN); */
+  /* if (usr_str_len == 0 || !access_ok(VERIFY_READ, usr_str, MAX_FILE_NAME_LEN)) */
+  /*   return -EINVAL; */
+  /* /\* Make sure there is a free inode/ decrement inodes counter in */
+  /*  * superblock */
+  /*  *\/ */
+  /* new_inode = get_free_index_node(); */
+  /* if (new_inode == NULL) */
+  /*   return -ENOMEM; */
+  /* strncpy_from_user(new_path_name, usr_str, MAX_FILE_NAME_LEN); */
   /* parent_inode = get_parent_index_node(new_path_name); */
 
   /* parent_inode->size += sizeof(directory_entry_t); */
+
+  /* /\* for (i = 0; i < MAX_NUM_DIR_ENTRIES; i++) { *\/ */
+
+  /* /\*   block_ptr *\/ */
+
+  /* /\* } *\/ */
+
+  /* if (status <= 0) */
+  /*   return status; */
   
 
-  if (status <= 0)
-    return status;
   
+  return 0;
+}
 
-  
+static int rd_mkdir(const char *usr_str)
+{
+  /* index_node_t new_index_node = { */
+  /*   .type = DIR, */
+  /*   .size = 0, */
+  /*   .file_lock = RW_LOCK_UNLOCKED, */
+  /*   .direct = { NULL }; */
+  /*   .single_indirect = NULL, */
+  /*   .double_indirect = NULL */
+  /* }; */
+  /* directory_entry_t new_directory_entry = { */
+  /*   .filename = { '\0' }, */
+  /*   .index_node_number = 0 */
+  /* }; */
+
+  /* /\* Check input is valid *\/ */
+  /* pathname = copy_from_user(usr_str); */
+  /* parent = get_parent_index_node(pathname);   */
+  /* if (parent == NULL) */
+  /*   return -EINVAL; */
+
+  /* new_inode_ptr = get_free_index_node(); */
+  /* *new_inode_ptr = new_index_node; */
+  /* new_directory_entry.index_node_number = (new_inode_ptr - index_nodes) / INODE_SZ; */
+  /* strncpy(strrchr(pathname, '/'), &new_directory_entry.filename); */
+
+  /* write_lock(&new_inode_ptr->file_lock); */
+  /* add_directory_entry(parent, new_directory_entry); */
+  /* write_unlock(&new_inode->file_lock); */
   return 0;
 }
 

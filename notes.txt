@@ -22,3 +22,9 @@ TODO:
      file_object_t   get_entry(fdt, file_descriptor)
      int 	     remove_entry(fdt, file_descriptor) //returns number of entries remaining in file descriptor table (after removal)
      int	     set_entry(fdt, file_descriptor, file_object_t);
+  char tokenize_char_arr[] = {"/drew/documents/file"};
+  char *to_print = NULL, tokenize = tokenize_char_arr;
+  printk(KERN_INFO "About to tokenize \"/drew/documents/file\"\n");
+  while ((to_print = strsep(&tokenize, "/")) != NULL) {
+      printk("%s\n", to_print);
+    }
