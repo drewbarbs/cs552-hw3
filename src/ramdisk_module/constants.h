@@ -14,6 +14,7 @@
 #define NUM_BLKS_DATA ((RD_SZ - BLK_SZ *(1 + NUM_BLKS_INODE + NUM_BLKS_BITMAP)) / BLK_SZ)
 #define DIR_ENTRY_SZ 16
 #define DIR_ENTRIES_PB (BLK_SZ / DIR_ENTRY_SZ)
+
 #define MAX_FILE_NAME_LEN 14 // Including null terminator
 #define MAX_FILE_SIZE BLK_SZ * (DIRECT + PTRS_PB + PTRS_PB*PTRS_PB)
 #define INIT_FDT_LEN 64

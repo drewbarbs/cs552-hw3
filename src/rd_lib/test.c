@@ -27,7 +27,10 @@ for (i = 0; i < current->size / sizeof(directory_entry_t); i++) {
       block_ptr = current->direct[i/DIR_ENTRIES_PB];
     }
   }
-  block_ptr[i];
+  /* if (block_ptr[i].filename is equal to token) {
+       current_index_node_number = block_ptr[i].index_node_number;
+       current
+     }
 
 
   
