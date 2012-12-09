@@ -30,7 +30,7 @@ static int create_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 							 file_object_t fo);
 static file_object_t get_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 						     unsigned short fd);
-static file_object_t set_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+static int set_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 						     unsigned short fd, file_object_t fo);
 static void delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 					       unsigned short fd);
@@ -96,7 +96,6 @@ static int procfs_open(struct inode *inode, struct file *file)
 
 static int procfs_close(struct inode *inode, struct file *file)
 {
-  file_descriptor_table_t *fdt = NULL;
   printk(KERN_DEBUG "Ramdisk module closing by %d (thread group %d)\n", current->pid, current->tgid);
   /* fdt =  get_file_descriptor_table(current->pid); */
   /*  if (fdt != NULL) */
@@ -272,6 +271,102 @@ static void debug_print_fdt_pids() {
     printk(KERN_DEBUG "Process %d\n", p->owner);
   }
   read_unlock(&file_descriptor_tables_rwlock);
+}
+
+/*
+ * Given a pointer to a process' file descriptor table, adds the given
+ * file object to the table, and returns the file descriptor corresponding
+ * to this new entry, or -errno on error
+ */
+static int create_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+							 file_object_t fo)
+{
+  int entry_index = 0;
+  file_object_t *p = NULL, *dest = NULL;
+  /* TODO: write_lock(fdt_rwlock) */
+  /* Check if we need to allocate larger array/copy over current array */
+  if (fdt->num_free_entries <= 0) {
+    /* TODO: write_unlock(fdt_rwlock) */
+    return -ENOMEM; /* TODO: in this case, try to allocate larger array/cpy old one */
+  }  
+  /* Search for empty entry in array, assumes that all empty entries are null'd out */
+  for (entry_index = 0; entry_index < fdt->entries_length; entry_index++) {
+    p = fdt->entries + entry_index;
+    if (p->index_node == NULL) {
+      dest = p;
+      break;
+    }
+  }
+  if (dest == NULL) {
+    printk(KERN_ERR "Couldn't find empty entry, despite checking num_free_entries\n");
+    /* write_unlock(fdt_rwlock) */
+    return -ENOMEM;
+  }
+  dest->index_node = fo.index_node;
+  dest->file_position = fo.file_position;
+  return entry_index;
+}
+
+/*
+ * Returns the file_object associated with the given file descriptor in the given
+ * file descriptor table. If the file descriptor is invalid, then a null file object
+ * (all fields have NULL/0 value) is returned
+ */
+static file_object_t get_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+						     unsigned short fd)
+{
+  file_object_t ret = { .index_node = NULL, .file_position = 0 };
+  /* TODO: read_lock(fdt_rwlock) */
+  if (fd >= (fdt->entries_length)) {
+    /* TODO: read_unlock(fdt_rwlock) */
+    return ret;
+  }
+  ret.index_node = fdt->entries[fd].index_node;
+  ret.file_position = fdt->entries[fd].file_position;
+  return ret;
+}
+
+/*
+ * Sets the file descriptor table entry assocated with the given file descriptor
+ * to the given file_object value.
+ *
+ * Returns 0 on success, -errno on error
+ */
+static int set_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+						     unsigned short fd, file_object_t fo)
+{
+  /* TODO: write_lock(fdt_rwlock) */
+  /* Check that the given file object has a valid index node pointer */
+  if ((unsigned long) fo.index_node < (unsigned long) index_nodes
+      || (unsigned long) fo.index_node >= (unsigned long) block_bitmap
+      || (((unsigned long) fo.index_node - (unsigned long)index_nodes) % INODE_SZ != 0)
+      || fd > fdt->entries_length) {
+    /* TODO: write_unlock(fdt_rwlock) */
+    return -EINVAL;
+  }
+  fdt->entries[fd] = fo;
+  /* TODO: write_unlock(fdt_rwlock) */
+  return 0;
+}
+
+/*
+ * Deletes the file descriptor table entry assocated with the given file descriptor
+ */
+static void delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
+					       unsigned short fd)
+{
+  file_object_t null_file_object = { .index_node = NULL, .file_position = 0 };
+  set_file_descriptor_table_entry(fdt, fd, null_file_object);
+  return;
+}
+static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
+					     unsigned short fd)
+{
+  size_t fdt_size;
+  /* TODO: read_lock(fdt_rwlock) */
+  fdt_size = fdt->entries_length - fdt->entries_length;
+  /* TODO: read_unlock(fdt_rwlock) */
+  return fdt_size;
 }
 
 /**
