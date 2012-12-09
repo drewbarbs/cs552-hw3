@@ -2,7 +2,8 @@
 	(0x200000(2mb) - 0x100 (super block) - 0x10000 (256 inode blocks) - 0x400 (4 blocks for bitmap) ) / 0x100 (block size)
 - Current implementation allows multiple threads to open file descriptors, but does not carry file descriptors -across- processes,
   or fork'd children. In order to go in this direction, could leverage pthread_t tgid (thread group id), and check for parents
-  of processes when looking for file descriptor table.
+  of processes when looking for file descriptor table. Approach of destroying file descriptor tables on close file operation
+  gets messy when considering multipled threads/ child processes
 
 -We were beaten to the name "struct super_block" by the linux kernel developers; it's already defined in linux/fs.h
 

@@ -85,7 +85,7 @@ static LIST_HEAD(file_descriptor_tables);
  */
 static int procfs_open(struct inode *inode, struct file *file)
 {
-  printk(KERN_DEBUG "Ramdisk module opening by %d\n", current->pid);
+  printk(KERN_DEBUG "Ramdisk module opening by %d (thread group %d)\n", current->pid, current->tgid);
   try_module_get(THIS_MODULE);
   return 0;
 }
@@ -97,10 +97,10 @@ static int procfs_open(struct inode *inode, struct file *file)
 static int procfs_close(struct inode *inode, struct file *file)
 {
   file_descriptor_table_t *fdt = NULL;
-  printk(KERN_DEBUG "Ramdisk module closing by %d\n", current->pid);
-  fdt =  get_file_descriptor_table(current->pid);
-   if (fdt != NULL)
-     delete_file_descriptor_table(fdt);
+  printk(KERN_DEBUG "Ramdisk module closing by %d (thread group %d)\n", current->pid, current->tgid);
+  /* fdt =  get_file_descriptor_table(current->pid); */
+  /*  if (fdt != NULL) */
+  /*    delete_file_descriptor_table(fdt); */
   module_put(THIS_MODULE);
   return 0;
 }
@@ -134,10 +134,10 @@ static void __exit cleanup_routine(void) {
    * which should have been destroyed in order for us
    * to reach this point. We will double check anyways.
    */
-  /* list_for_each_entry_safe(p, next, &file_descriptor_tables, list) { */
-  /*   printk(KERN_DEBUG "Deleting fdt for process %d\n", p->owner); */
-  /*   delete_file_descriptor_table(p->owner); */
-  /* } */
+  list_for_each_entry_safe(p, next, &file_descriptor_tables, list) {
+    printk(KERN_DEBUG "Deleting fdt for process %d\n", p->owner);
+    delete_file_descriptor_table(p->owner);
+  }
   if (super_block != NULL) {
     printk(KERN_INFO "Freeing ramdisk memory\n");
     vfree(super_block);

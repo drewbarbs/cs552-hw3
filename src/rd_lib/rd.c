@@ -50,6 +50,7 @@ void thread_func(void *arg)
   printf("Thread %d about to open ramdisk\n", (int) arg);
   int fd;
   fd = open("/proc/ramdisk", 0);
+  ioctl(fd, DBG_MK_FDT, NULL);  
   printf("Thread %d about to close ramdisk\n", (int) arg);
   close(fd);
   while (1) {}
@@ -57,13 +58,14 @@ void thread_func(void *arg)
 }
 int main(int argc, char *argv[])
 {
-  rd_init();
 #ifdef MULTI_THREAD
   pthread_attr_init(&attr1);
   pthread_attr_init(&attr2);
   pthread_create(&t1, &attr1, thread_func, 1);
   pthread_create(&t2, &attr2, thread_func, 2);
+  sleep(2);
 #endif
+  rd_init();
   printf("My pid: %d\n", getpid());
   if (argc > 1 && strcmp(argv[1], "c") == 0)
     ioctl(fd, DBG_MK_FDT, NULL);  
