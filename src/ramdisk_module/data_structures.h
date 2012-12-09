@@ -32,7 +32,7 @@ typedef struct index_node {
 } index_node_t; //sizeof(index_node_t) == 52
 
 typedef struct directory_entry {
-  char *filename; /* 14 bytes including null terminator */
+  char filename[MAX_FILE_NAME_LEN]; /* 14 bytes including null terminator */
   unsigned short index_node_number; // 2 bytes
 } directory_entry_t;
 

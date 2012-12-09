@@ -18,10 +18,10 @@
 MODULE_LICENSE("GPL");
 
 /* *** Forward declarations of ramdisk functions *** */
-static int super_block_init(void);
-static int rd_init(void);
 static int ramdisk_ioctl(struct inode *inode, struct file *filp, 
 			 unsigned int cmd, unsigned long arg);
+/* Helper Routines */
+static int rd_init(void);
 static bool rd_initialized(void);
 static int  create_file_descriptor_table(pid_t pid);
 static file_descriptor_table_t *get_file_descriptor_table(pid_t pid);
@@ -36,6 +36,8 @@ static void delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 					       unsigned short fd);
 static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 					     unsigned short fd);
+/* Routines for implementing ramdisk API */
+static int rd_creat(char *usr_str);
 /* *** Debug Functions *** */
 static void debug_print_fdt_pids(void);
 
@@ -61,6 +63,7 @@ DEFINE_RWLOCK(index_nodes_rwlock);
 DEFINE_RWLOCK(file_descriptor_tables_rwlock);
 
 /* Declarations of ramdisk data structures */
+static bool rd_initialized_flag = false;
 static super_block_t *super_block = NULL;
 static index_node_t *index_nodes = NULL; // 256 blocks/64 bytes per inode = 1024 inodes
 static void *block_bitmap = NULL; // 4 blocks => block_bitmap is 1024 bytes long
@@ -85,7 +88,7 @@ static LIST_HEAD(file_descriptor_tables);
  */
 static int procfs_open(struct inode *inode, struct file *file)
 {
-  printk(KERN_DEBUG "Ramdisk module opening by %d (thread group %d)\n", current->pid, current->tgid);
+  printk(KERN_DEBUG "Ramdisk module opening by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
   try_module_get(THIS_MODULE);
   return 0;
 }
@@ -96,7 +99,7 @@ static int procfs_open(struct inode *inode, struct file *file)
 
 static int procfs_close(struct inode *inode, struct file *file)
 {
-  printk(KERN_DEBUG "Ramdisk module closing by %d (thread group %d)\n", current->pid, current->tgid);
+  printk(KERN_DEBUG "Ramdisk module being closed by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
   /* fdt =  get_file_descriptor_table(current->pid); */
   /*  if (fdt != NULL) */
   /*    delete_file_descriptor_table(fdt); */
@@ -115,6 +118,14 @@ static int __init initialization_routine(void) {
     return 1;
   }
   proc_entry->proc_fops = &ramdisk_file_ops;
+
+  /* Check we have our sizes right */
+  /* printk("BLK_SZ: %d, sizeof(directory_entry_t): %d, BLK_SZ/sizeof(director_entry_t): %d\n", */
+  /* 	 BLK_SZ, sizeof(directory_entry_t), BLK_SZ/ sizeof(directory_entry_t)); */
+  /* printk("Super block size: %d\n", sizeof(super_block_t)); */
+  /* printk("Indirect block size: %d\n", sizeof(indirect_block_t)); */
+  /* printk("Double indirect block size: %d\n", sizeof(double_indirect_block_t)); */
+  /* printk("Max Single File Size: %d\n", MAX_FILE_SIZE); */
 
   return 0;
 }
@@ -380,7 +391,7 @@ bool rd_initialized()
 {
   bool ret;
   read_lock(&rd_init_rwlock);
-  ret = super_block != NULL;
+  ret = rd_initialized_flag;
   read_unlock(&rd_init_rwlock);
   return ret;
 }
@@ -390,6 +401,14 @@ bool rd_initialized()
    return 0 on success, an errno otherwise */
 int rd_init()
 {
+  const super_block_t init_super_block = {.num_free_blocks = NUM_BLKS_DATA,
+					  .num_free_inodes = NUM_BLKS_INODE*BLK_SZ/INODE_SZ};
+  const index_node_t root_inode = { .type = dir,
+				    .size = 0,
+				    .file_lock = RW_LOCK_UNLOCKED,
+				    .direct = { NULL },
+				    .single_indirect = NULL,
+				    .double_indirect = NULL};
   if (rd_initialized()) {
     return -EALREADY;
   }
@@ -405,9 +424,14 @@ int rd_init()
   index_nodes = (index_node_t *) ((void *) super_block + BLK_SZ);
   block_bitmap = ((void *)index_nodes + NUM_BLKS_INODE * INODE_SZ);
   data_blocks = block_bitmap + NUM_BLKS_BITMAP * BLK_SZ;
-  write_unlock(&rd_init_rwlock);  
+  *super_block = init_super_block;
+  rd_initialized_flag = true;
+  index_nodes[0] = root_inode;
+  write_unlock(&rd_init_rwlock);
   return 0;
 }
+
+
 
 module_init(initialization_routine);
 module_exit(cleanup_routine);
