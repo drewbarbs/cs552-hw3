@@ -4,7 +4,7 @@
   or fork'd children. In order to go in this direction, could leverage pthread_t tgid (thread group id), and check for parents
   of processes when looking for file descriptor table. Approach of destroying file descriptor tables on close file operation
   gets messy when considering multipled threads/ child processes. Process and its children all belong to same process group (getpgrp()).
-
+- Current approach to removing directory entries is prone to fragmentation: leaves blank directory entries in between used ones
 -We were beaten to the name "struct super_block" by the linux kernel developers; it's already defined in linux/fs.h
 
 Synchronization Primitives:

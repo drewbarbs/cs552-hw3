@@ -46,7 +46,7 @@ static int add_directory_entry(index_node_t *parent_inode,
 				directory_entry_t new_entry); /* Insert directory entry,
 								 add increment size */
 static offset_info_t get_offset_info(index_node_t *inode, int offset);
-static void *get_offset_address(index_node_t *inode, int offset);
+static void *get_byte_address(index_node_t *inode, int offset);
 /* Routines for implementing ramdisk API */
 static int rd_creat(const char *usr_str);
 static int rd_mkdir(const char *usr_str);
@@ -90,7 +90,8 @@ static void *data_blocks = NULL; // len(data_blocks) == 7931 blocks
 static LIST_HEAD(file_descriptor_tables);
 
 #define INODE_PTR(index) ((void *) index_nodes + index * INODE_SZ)
-
+#define BLOCK_START(byte_address) ((void *)byte_address - (((unsigned long) ((void *)byte_address - data_blocks)) % BLK_SZ))
+#define BLOCK_END(byte_address) (BLOCK_START(byte_address) + BLK_SZ)
 
 /**
  *
@@ -114,10 +115,20 @@ static int procfs_open(struct inode *inode, struct file *file)
 
 static int procfs_close(struct inode *inode, struct file *file)
 {
+  int i = 0;
+  file_descriptor_table_t *fdt = NULL;
+  file_object_t fo;
   printk(KERN_DEBUG "Ramdisk module being closed by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
-  /* fdt =  get_file_descriptor_table(current->pid); */
-  /*  if (fdt != NULL) */
-  /*    delete_file_descriptor_table(fdt); */
+  fdt =  get_file_descriptor_table(current->pid);
+  /* Here, I assume that the no other thread will be accessing this fdt */
+  if (fdt != NULL) {
+    for (i = 0; i < fdt->entries_length; i++) {
+      fo = get_file_descriptor_table_entry(fdt, i);
+      if (fo->index_node != NULL)
+	read_unlock(&fo->index_node->file_lock);
+    }
+    delete_file_descriptor_table(current->pid);
+  }
   module_put(THIS_MODULE);
   return 0;
 }
@@ -476,7 +487,7 @@ static index_node_t *get_index_node(const char *pathname)
       break;
     }
     for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
-      dir_entry = get_offset_address(curr, i * sizeof(directory_entry_t));
+      dir_entry = get_byte_address(curr, i * sizeof(directory_entry_t));
       if (strncmp(dir_entry->filename, token, MAX_FILE_NAME_LEN) == 0) {
 	curr = INODE_PTR(dir_entry->index_node_number);
 	break;
@@ -498,6 +509,7 @@ static index_node_t *get_index_node(const char *pathname)
 static void *get_free_data_block()
 {
   unsigned long block_num = 0;
+  void *block_address = NULL;
   spin_lock(&super_block_spinlock);
   if (super_block->num_free_blocks == 0) {
     spin_unlock(&super_block_spinlock);
@@ -515,7 +527,9 @@ static void *get_free_data_block()
   }
   set_bit(block_num, block_bitmap);
   spin_unlock(&block_bitmap_spinlock);
-  return block_bitmap + block_num * BLK_SZ;
+  block_address = data_blocks + block_num * BLK_SZ;
+  memset(block_address, 0, BLK_SZ);
+  return block_address;
 }
 
 /*
@@ -538,11 +552,6 @@ static void release_data_block(void *data_block_ptr)
   clear_bit(block_num, block_bitmap);
   spin_unlock(&block_bitmap_spinlock);
   return;
-}
-
-static void release_all_data_blocks(index_node_t *inode)
-{
-  
 }
 
 /**
@@ -655,7 +664,7 @@ static offset_info_t get_offset_info(index_node_t *inode, int offset)
  * byte of the data associated with inode (along with the start and end addresses
  * of the containing data block), or NULL on error
  */
-static void *get_offset_address(index_node_t *inode, int offset)
+static void *get_byte_address(index_node_t *inode, int offset)
 {
   int data_block_num, indirect_block_num, dbl_indirect_block_num, offset_into_block;
   void *offset_address = NULL, *block_start_address;
@@ -748,6 +757,100 @@ static int rd_mkdir(const char *usr_str)
   /* write_lock(&new_inode_ptr->file_lock); */
   /* add_directory_entry(parent, new_directory_entry); */
   /* write_unlock(&new_inode->file_lock); */
+  return 0;
+}
+
+static int rd_unlink(const char *usr_str)
+{
+  char *pathname = NULL, *filename = NULL;
+  index_node_t *inode, *parent;
+  directory_entry_t *curr_dir_entry = NULL, *next_dir_block_ptr = NULL;
+  void *block_to_release = NULL;
+  int num_blocks, i = 0, j = 0, bytes_defragged = 0;
+  size_t usr_strlen = strlen_user(usr_str);
+  bool block_empty = true;
+  const index_node_t clean_inode = { .type = DIR,
+				    .size = 0,
+				    .file_lock = RW_LOCK_UNLOCKED,
+				    .direct = { NULL },
+				    .single_indirect = NULL,
+				    .double_indirect = NULL};
+  /* usr_strlen <= 2 implies only valid pathname it could be is '/',
+     which can't be unlinked
+  */
+  if (usr_strlen <= 2 || !access_ok(VERIFY_READ, usr_str, strlen_user(usr_str)))
+    return -EINVAL;
+  pathname = kcalloc(usr_strlen, sizeof(char), GFP_KERNEL);
+  strncpy_from_user(pathname, usr_str, usr_strlen);
+  /* Remove trailing forward slash, if it exists */
+  if (pathname[usr_strlen-1] == '/')
+    pathname[usr_strlen-1] = '\0';
+
+  if ((inode = get_index_node(pathname)) == NULL) {
+    kfree(pathname);
+    return -ENOENT;
+  }
+  if (write_trylock(&inode->file_lock) == 0) {
+    kfree(pathname);
+    return -EACCES; // File must be open for reading currently
+  }
+ 
+  parent = get_parent_index_node(pathname);
+
+  /* If parent != NULL , remove dir entry for inode. */
+  if (parent != NULL) {
+    filename = kcalloc(usr_strlen, sizeof(char), GFP_KERNEL);
+    strcpy(strrchr(pathname, '/') + 1, filename);
+    write_lock(&parent->file_lock);
+    for (i = 0; i < parent->size; i += sizeof(directory_entry_t)) {
+      curr_dir_entry = get_byte_address(parent, i);
+      if (strncmp(curr_dir_entry->filename, filename, MAX_FILE_NAME_LEN) == 0) {
+	memset(curr_dir_entry->filename, 0, MAX_FILE_NAME_LEN);
+	curr_dir_entry->index_node_number = 0;
+	parent->size -= sizeof(directory_entry_t);
+	if ((unsigned long) (curr_dir_entry + 1) < (unsigned long) BLOCK_END(curr_dir_entry)) {
+	  memmove(curr_dir_entry, curr_dir_entry + 1, (BLOCK_END(curr_dir_entry) - (void *) curr_dir_entry) - 1);
+	}
+	bytes_defragged = i * sizeof(directory_entry_t) + (int) (BLOCK_END(curr_dir_entry) - (void *)curr_dir_entry - sizeof(directory_entry_t));
+	curr_dir_entry = (directory_entry_t *) BLOCK_END(curr_dir_entry) - 1;
+	while (bytes_defragged < parent->size) {
+	  next_dir_block_ptr = get_byte_address(parent, bytes_defragged + sizeof(directory_entry_t));
+	  memcpy(curr_dir_entry, next_dir_block_ptr, sizeof(directory_entry_t));
+	  memmove(next_dir_block_ptr, next_dir_block_ptr + 1, BLK_SZ - sizeof(directory_entry_t));
+	  bytes_defragged += BLK_SZ;
+	  curr_dir_entry = (directory_entry_t *) BLOCK_END(next_dir_block_ptr) - 1;
+	}
+
+	/* If no directory entries remaining in this block,
+	   release it for reallocation
+	*/
+	/* for (dir_block_it_ptr = BLOCK_START(curr_dir_entry); */
+	/*      j < BLOCK_START(curr_dir_entry) + BLK_SZ; j++) { */
+	/*   if (strlen(dir_block_it_ptr->filename) != 1 || dir_block_it_ptr->index_node_number !=0) { */
+	/*     block_empty = false; */
+	/*     break; */
+	/*   } */
+	/* } */
+	/* if (block_empty) */
+	/*   release_data_block(BLOCK_START(curr_dir_entry)); */
+	break;
+      }
+    }
+    write_unlock(&parent->file_lock);
+    kfree(filename);
+  }
+  /* Release all data blocks associated with this file */
+  num_blocks = inode->size/ BLK_SZ;
+  while (num_blocks != 0) {
+    block_to_release = get_byte_address(inode, (num_blocks - 1) * BLK_SZ);
+    release_data_block(block_to_release);
+    num_blocks--;
+  }
+  *inode = clean_inode;
+  spin_lock(&super_block_spinlock);
+  super_block->num_free_inodes++;
+  spin_unlock(&super_block_spinlock);
+  kfree(pathname);
   return 0;
 }
 

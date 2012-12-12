@@ -12,28 +12,28 @@ int main() {
   char *tokenize = pathname_copy + 1;
   /* char *pathname_copy = calloc(strlen(pathname) + 1, sizeof(char)); */
   /* strncpy(pathname_copy, pathname, strlen(pathname) - strlen(strrchr(pathname, '/'))); */
-  while ((to_print = strsep(&tokenize, "/")) != NULL) {
-      printf("%s\n", to_print);
-    }
-  //  printf("%s\n", pathname_copy);
+  /* while ((to_print = strsep(&tokenize, "/")) != NULL) { */
+  /*     printf("%s\n", to_print); */
+  /*   } */
+  printf("%s\n", strrchr(pathname, '/'));
   printf("Finished\n");
   return 0;
 }
 
 
-for (i = 0; i < current->size / sizeof(directory_entry_t); i++) {
-  if (i % DIR_ENTRIES_PB == 0) {
-    if (i < DIRECT * DIR_ENTRIES_PB) {
-      block_ptr = current->direct[i/DIR_ENTRIES_PB];
-    } else if (i < DIR_ENTRIES_PB * (DIRECT + PTRS_PB)) {
+/* for (i = 0; i < current->size / sizeof(directory_entry_t); i++) { */
+/*   if (i % DIR_ENTRIES_PB == 0) { */
+/*     if (i < DIRECT * DIR_ENTRIES_PB) { */
+/*       block_ptr = current->direct[i/DIR_ENTRIES_PB]; */
+/*     } else if (i < DIR_ENTRIES_PB * (DIRECT + PTRS_PB)) { */
       
-    }
-  }
+/*     } */
+/*   } */
   /* if (block_ptr[i].filename is equal to token) {
        current_index_node_number = block_ptr[i].index_node_number;
        current
      }
-
+     *
 
   
- }
+     }*/
