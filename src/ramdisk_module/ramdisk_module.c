@@ -124,8 +124,8 @@ static int procfs_close(struct inode *inode, struct file *file)
   if (fdt != NULL) {
     for (i = 0; i < fdt->entries_length; i++) {
       fo = get_file_descriptor_table_entry(fdt, i);
-      if (fo->index_node != NULL)
-	read_unlock(&fo->index_node->file_lock);
+      if (fo.index_node != NULL)
+	read_unlock(&fo.index_node->file_lock);
     }
     delete_file_descriptor_table(current->pid);
   }
