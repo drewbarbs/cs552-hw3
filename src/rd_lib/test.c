@@ -25,6 +25,8 @@ for (i = 0; i < current->size / sizeof(directory_entry_t); i++) {
   if (i % DIR_ENTRIES_PB == 0) {
     if (i < DIRECT * DIR_ENTRIES_PB) {
       block_ptr = current->direct[i/DIR_ENTRIES_PB];
+    } else if (i < DIR_ENTRIES_PB * (DIRECT + PTRS_PB)) {
+      
     }
   }
   /* if (block_ptr[i].filename is equal to token) {

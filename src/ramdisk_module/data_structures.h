@@ -5,8 +5,8 @@
 
 typedef struct offset_info {
   void *block_start;
-  void *data_start;
-  void *block_end;
+  void *data_start; // Address of byte at offset into file
+  void *block_end; // Last byte in block is at (block_end - 1)
 } offset_info_t;
 
 typedef struct rd_super_block {

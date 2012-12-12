@@ -27,7 +27,7 @@ static int  create_file_descriptor_table(pid_t pid);
 static file_descriptor_table_t *get_file_descriptor_table(pid_t pid);
 static void delete_file_descriptor_table(pid_t pid);
 static int create_file_descriptor_table_entry(file_descriptor_table_t *fdt,
-							 file_object_t fo);
+					      file_object_t fo);
 static file_object_t get_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 						     unsigned short fd);
 static int set_file_descriptor_table_entry(file_descriptor_table_t *fdt,
@@ -37,7 +37,6 @@ static void delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 					     unsigned short fd);
 static index_node_t *get_free_index_node(void);
-//static void release_index_node(index_node_t *inode);
 static index_node_t *get_parent_index_node(const char *pathname); // DOESNT TRASH PATHNAME
 static index_node_t *get_index_node(const char *pathname);
 static void *get_free_data_block(void);
@@ -47,6 +46,7 @@ static int add_directory_entry(index_node_t *parent_inode,
 				directory_entry_t new_entry); /* Insert directory entry,
 								 add increment size */
 static offset_info_t get_offset_info(index_node_t *inode, int offset);
+static void *get_offset_address(index_node_t *inode, int offset);
 /* Routines for implementing ramdisk API */
 static int rd_creat(const char *usr_str);
 static int rd_mkdir(const char *usr_str);
@@ -89,6 +89,8 @@ static void *block_bitmap = NULL; // 4 blocks => block_bitmap is 1024 bytes long
 static void *data_blocks = NULL; // len(data_blocks) == 7931 blocks
 static LIST_HEAD(file_descriptor_tables);
 
+#define INODE_PTR(index) ((void *) index_nodes + index * INODE_SZ)
+
 
 /**
  *
@@ -121,7 +123,6 @@ static int procfs_close(struct inode *inode, struct file *file)
 }
 static int __init initialization_routine(void) {
   printk(KERN_INFO "Loading ramdisk module\n");
-  
   ramdisk_file_ops.ioctl = ramdisk_ioctl;
 
   /* Start create proc entry */
@@ -167,6 +168,7 @@ static void __exit cleanup_routine(void) {
 static int ramdisk_ioctl(struct inode *inode, struct file *filp,
 			 unsigned int cmd, unsigned long arg) 
 {
+  offset_info_t offset_info;
   printk(KERN_INFO "Called ioctl\n");
   if (cmd != RD_INIT && !rd_initialized()) {
     printk(KERN_ERR "Ramdisk called before being initialized\n");
@@ -188,6 +190,14 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   case DBG_RM_FDT:
     delete_file_descriptor_table((pid_t) arg);
     break;
+  /* case DBG_TEST_OFFSET_INFO: */
+  /*   offset_info = get_offset_info((int) arg); */
+  /*   printk(KERN_DEBUG "Data blocks start at %p\n", data_blocks); */
+  /*   printk(KERN_DEBUG "Offset %d\n", (int) arg); */
+  /*   printk(KERN_DEBUG "This block starts at %p\n", offset_info.block_start); */
+  /*   printk(KERN_DEBUG "The data starts at %p\n", offset_info.data_start); */
+  /*   printk(KERN_DEBUG "This block ends at %p\n", offset_info.block_end); */
+  /*   break; */
   default:
     return -EINVAL;
   }
@@ -427,40 +437,6 @@ static index_node_t *get_free_index_node()
   return new_inode;
 }
 
-/* static void release_free_index_node(index_node_t *inode) */
-/* { */
-  
-/* } */
-
-static index_node_t *get_index_node(const char *pathname)
-{
-  const char *pathname_copy;
-  char *token, *tokenize;
-  index_node_t *current = index_nodes, *parent = NULL;
-  if (strlen(pathname) == 0)
-    return NULL;
-  if (strlen(pathname) == 1 && pathname[0] == '/')
-    return index_nodes; // Points to root index node
-  
-  pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
-  strncpy(pathname_copy, pathname, strlen(pathname));
-  tokenize = pathname_copy + 1;
-  while ((token = strsep(&tokenize, "/")) != NULL) {
-    if (current->type != DIR) {
-      parent = NULL;
-      break;
-    }
-    for (i = 0; i < current->size / sizeof(directory_entry_t); i++) {
-      
-    }
-
-    
-  }
-
-  kfree(pathname_copy);
-}
-
-
 /*
  * Returns the index node of directory containing the file
  * indicated by pathname, or NULL on error.
@@ -479,6 +455,94 @@ static index_node_t *get_parent_index_node(const char *pathname)
   parent = get_index_node(pathname_copy);
   kfree(pathname_copy);
   return parent;
+}
+
+static index_node_t *get_index_node(const char *pathname)
+{
+  char *pathname_copy, *token, *tokenize;
+  index_node_t *curr = index_nodes;
+  directory_entry_t *dir_entry = NULL;
+  int i = 0;
+  if (strlen(pathname) == 0)
+    return NULL;
+  if (strlen(pathname) == 1 && pathname[0] == '/')
+    return index_nodes; // Points to root index node
+  
+  pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
+  strncpy(pathname_copy, pathname, strlen(pathname));
+  tokenize = pathname_copy + 1; // skip the first forward slash
+  while ((token = strsep(&tokenize, "/")) != NULL) {
+    if (curr->type != DIR) {
+      break;
+    }
+    for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
+      dir_entry = get_offset_address(curr, i * sizeof(directory_entry_t));
+      if (strncmp(dir_entry->filename, token, MAX_FILE_NAME_LEN) == 0) {
+	curr = INODE_PTR(dir_entry->index_node_number);
+	break;
+      }
+    }
+  }
+  kfree(pathname_copy);
+  /* if (token != NULL) */
+  /*   return NULL; */
+  /* return  */
+
+  return (token == NULL ? curr : NULL);
+}
+
+/*
+ * Returns a pointer to a free data block, or NULL if one is
+ * not available
+ */
+static void *get_free_data_block()
+{
+  unsigned long block_num = 0;
+  spin_lock(&super_block_spinlock);
+  if (super_block->num_free_blocks == 0) {
+    spin_unlock(&super_block_spinlock);
+    return NULL;
+  }
+  super_block->num_free_blocks--;  
+  spin_unlock(&super_block_spinlock);
+  spin_lock(&block_bitmap_spinlock);
+  block_num = find_first_bit(block_bitmap, NUM_BLKS_BITMAP * BLK_SZ * 8);
+  if (block_num == NUM_BLKS_BITMAP * BLK_SZ * 8) {
+    printk(KERN_ERR "Uh oh. The super block said there was a free block, "
+	   "but the block bitmap says otherwise...\n");
+    spin_unlock(&block_bitmap_spinlock);
+    return NULL;
+  }
+  set_bit(block_num, block_bitmap);
+  spin_unlock(&block_bitmap_spinlock);
+  return block_bitmap + block_num * BLK_SZ;
+}
+
+/*
+ *  Frees the data block pointed to by data_block_ptr to be
+ *  re-allocated. DO NOT CALL THIS FUNCTION WHILE HOLDNG
+ *  super_block_spinlock OR block_bitmap_spinlock
+ */
+static void release_data_block(void *data_block_ptr)
+{
+  int block_num;
+  if (data_block_ptr == NULL) {
+    printk(KERN_ERR "Asked to release NULL data block\n");
+    return;
+  }
+  block_num = (data_block_ptr - data_blocks) / BLK_SZ;
+  spin_lock(&super_block_spinlock);
+  super_block->num_free_blocks++;  
+  spin_unlock(&super_block_spinlock);
+  spin_lock(&block_bitmap_spinlock);
+  clear_bit(block_num, block_bitmap);
+  spin_unlock(&block_bitmap_spinlock);
+  return;
+}
+
+static void release_all_data_blocks(index_node_t *inode)
+{
+  
 }
 
 /**
@@ -533,14 +597,94 @@ int rd_init()
 }
 
 /*
- * Returns the index node corresponding to the directory
- * containing the file indicated by pathname, or NULL
- * on error
+ * Returns a (struct offset_info) that gives the address of the offset'th
+ * byte of the data associated with inode (along with the start and end addresses
+ * of the containing data block), or an all NULL (struct offset_info) on error
  */
-static index_node_t *get_parent_index_node(char *pathname)
+static offset_info_t get_offset_info(index_node_t *inode, int offset)
 {
-  return index_nodes; /*TODO */
+  int data_block_num, indirect_block_num, dbl_indirect_block_num, offset_into_block;
+  offset_info_t offset_info = {
+    .block_start = NULL,
+    .data_start = NULL,
+    .block_end = NULL
+  };
+  if (offset >= inode->size )
+    return offset_info;
+  
+  data_block_num = offset / BLK_SZ; // integer divison
+  offset_into_block = offset % BLK_SZ;
+  read_lock(&inode->file_lock);
+  
+  if (data_block_num < DIRECT) {
+    /* if(inode->direct[data_block_num] == NULL) { */
+    /*   read_unlock(inode->file_lock); */
+    /*   printk(KERN_ERR "Tried to get address of invalid offset " */
+    /* 	     "%d into index node #%d\n", offset, */
+    /* 	     ((long) inode - (long) index_nodes) / INODE_SZ); */
+    /*   return offset_info; */
+    /* } */
+    offset_info.block_start = inode->direct[data_block_num];
+    /* offset_info.data_start = inode->direct[data_block_num] + offset_into_block; */
+    /* offset_info.block_end = inode->direct[data_block_num] + BLK_SZ; */
+  } else if (data_block_num < DIRECT + PTRS_PB) {
+    /* if (inode->single_indirect == NULL) { */
+    /*   read_unlock(inode->file_lock); */
+    /*   printk(KERN_ERR "Tried to get address of invalid offset " */
+    /* 	     "%d into index node #%d\n", offset, */
+    /* 	     ((long) inode - (long) index_nodes) / INODE_SZ); */
+    /*   return offset_info; */
+
+    /* } */
+    indirect_block_num = data_block_num - DIRECT;
+    offset_info.block_start = inode->single_indirect->data[indirect_block_num];
+  } else {// data_block_num < DIRECT + PTRS_PB(1 + PTRS_PB)
+    dbl_indirect_block_num = (data_block_num - (DIRECT + PTRS_PB)) / PTRS_PB; //integer division
+    indirect_block_num = data_block_num - (DIRECT + PTRS_PB) - dbl_indirect_block_num * PTRS_PB;
+    offset_info.block_start = inode->double_indirect->indirect_blocks[dbl_indirect_block_num]->
+						    data[indirect_block_num];
+  }
+  offset_info.data_start = offset_info.block_start + offset_into_block;
+  offset_info.block_end = offset_info.block_start + BLK_SZ;
+  read_unlock(&inode->file_lock);
+  return offset_info;
 }
+
+/*
+ * Returns the address of the offset'th
+ * byte of the data associated with inode (along with the start and end addresses
+ * of the containing data block), or NULL on error
+ */
+static void *get_offset_address(index_node_t *inode, int offset)
+{
+  int data_block_num, indirect_block_num, dbl_indirect_block_num, offset_into_block;
+  void *offset_address = NULL, *block_start_address;
+  if (offset >= inode->size )
+    return offset_address;
+  
+  data_block_num = offset / BLK_SZ; // integer divison
+  offset_into_block = offset % BLK_SZ;
+  read_lock(&inode->file_lock);
+  
+  if (data_block_num < DIRECT) {
+    block_start_address = inode->direct[data_block_num];
+  } else if (data_block_num < DIRECT + PTRS_PB) {
+    indirect_block_num = data_block_num - DIRECT;
+    block_start_address = inode->single_indirect->data[indirect_block_num];
+  } else {// data_block_num < DIRECT + PTRS_PB(1 + PTRS_PB)
+    dbl_indirect_block_num = (data_block_num - (DIRECT + PTRS_PB)) / PTRS_PB; //integer division
+    indirect_block_num = data_block_num - (DIRECT + PTRS_PB) - dbl_indirect_block_num * PTRS_PB;
+    block_start_address = inode->double_indirect->indirect_blocks[dbl_indirect_block_num]->
+						    data[indirect_block_num];
+  }
+  offset_address = block_start_address + offset_into_block;
+  read_unlock(&inode->file_lock);
+  return offset_address;
+}
+
+
+
+
 static int rd_creat(const char *usr_str)
 {
   /* int status = 0, i = 0; */
