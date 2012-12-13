@@ -627,6 +627,13 @@ int rd_init()
 				    .direct = { NULL },
 				    .single_indirect = NULL,
 				    .double_indirect = NULL};
+  const index_node_t regular_inode = { .type = UNALLOCATED,
+				    .size = 0,
+				    .file_lock = RW_LOCK_UNLOCKED,
+				    .direct = { NULL },
+				    .single_indirect = NULL,
+				    .double_indirect = NULL};
+  int i = 0;
   if (rd_initialized()) {
     return -EALREADY;
   }
@@ -645,6 +652,9 @@ int rd_init()
   *super_block = init_super_block;
   rd_initialized_flag = true;
   index_nodes[0] = root_inode;
+  for (i = 1; i < NUM_INODES; i++) {
+    index_nodes[i] = regular_inode;
+  }
   write_unlock(&rd_init_rwlock);
   return 0;
 }
