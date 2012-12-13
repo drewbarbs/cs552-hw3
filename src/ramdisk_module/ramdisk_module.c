@@ -497,10 +497,16 @@ static index_node_t *get_index_node(const char *pathname)
   index_node_t *curr = index_nodes;
   directory_entry_t *dir_entry = NULL;
   int i = 0;
+  bool found_prev_inode = true; // start with index_nodes
+  printk("Printing entries in root index_node\n");
+  for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
+    dir_entry = get_directory_entry(curr, i);
+    printk("%s , inode # %d\n", dir_entry->filename, dir_entry->index_node_number);
+  }
 
-  if (strlen(pathname) == 0)
+  if (strlen(pathname) == 2 && pathname[0] != '/')
     return NULL;
-  if (strlen(pathname) == 1 && pathname[0] == '/') {
+  if (strlen(pathname) == 2 && pathname[0] == '/') { //strlen in kernel space -includes- trailing NULL
     return index_nodes; // Points to root index node
   }
   pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
@@ -543,7 +549,7 @@ static index_node_t *get_index_node(const char *pathname)
   /* 		  break; */
   /* 		} */
   /* 	  } */
-  /* 	}   */
+  /* 	} */
   /* } */
   /* kfree(parent_pathname); */
   /* return node; */
@@ -827,10 +833,11 @@ static int rd_mkdir(const char *usr_str)
       }
     }
   } else {
-    entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + DIR_ENTRY_SZ;
+    entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
   }
   entry->index_node_number = (new_inode_ptr - index_nodes) / INODE_SZ;
-  strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
+  printk("Got index node number :%d for %s", entry->index_node_number, strrchr(pathname, '/') + 1);
+ strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
   parent->size += DIR_ENTRY_SZ;
   kfree(pathname);
   return 0;

@@ -139,17 +139,25 @@ int rd_readdir(int fd, char *address)
 #ifdef DEBUG
 int main(int argc, char *argv[])
 {
-  char filename[14] = "/";
+  char filename[14] = "/hello";
   char *hello = "/hello";
+  char *another = "/another";
+  char *world = "/hello/world";
   char *buf = calloc(15, 1);
   int handle;
   rd_init();
 
-  printf("Try to create got return: %d\n", rd_mkdir(hello));
+  printf("Try to create %s , got return: %d\n", hello, rd_mkdir(hello));
+  printf("Try to create %s , got return: %d\n", another, rd_mkdir(another));
+  printf("Try to create %s , got return: %d\n", world, rd_mkdir(world));
   if (((handle = rd_open(filename)) < 0)){
     perror("Open\n");
     }
   printf("Handle %d\n", handle);
+  rd_readdir(handle, buf);
+  printf("About to print buf");
+  printf("%s\n", buf);
+  memset(buf, 0, 15);
   rd_readdir(handle, buf);
   printf("About to print buf");
   printf("%s\n", buf);
