@@ -809,10 +809,10 @@ static int rd_mkdir(const char *usr_str)
   if (parent->size % BLK_SZ == 0) {
     printk("mkdir about to ask for new data_block for %s\n", pathname);
     entry = get_free_data_block();
-    if (parent->size < DIRECT * DIR_ENTRIES_PB){
+    if (parent->size < DIRECT * BLK_SZ){
       parent->direct[parent->size / BLK_SZ] = entry;
-    } else if (parent->size < DIR_ENTRIES_PB * (DIRECT + PTRS_PB)) {
-      if (parent->size == DIRECT * DIR_ENTRIES_PB) {
+    } else if (parent->size < BLK_SZ * (DIRECT + PTRS_PB)) {
+      if (parent->size == DIRECT * BLK_SZ) {
 	indirect_block_t *indirect_block = get_free_data_block();
 	if (indirect_block == NULL)
 	  return -EFBIG;
@@ -823,7 +823,7 @@ static int rd_mkdir(const char *usr_str)
 	  data[(parent->size / BLK_SZ) - DIRECT] = (void *) entry;
       }
     } else {
-      if (parent->size == DIR_ENTRIES_PB * (DIRECT + PTRS_PB)) {
+      if (parent->size == BLK_SZ * (DIRECT + PTRS_PB)) {
 	double_indirect_block_t *double_indirect_block = get_free_data_block();
 	indirect_block_t *indirect_block = get_free_data_block();
 	if (indirect_block == NULL || double_indirect_block == NULL) {

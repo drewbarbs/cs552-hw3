@@ -139,38 +139,25 @@ int rd_readdir(int fd, char *address)
 #ifdef DEBUG
 int main(int argc, char *argv[])
 {
-  char filename[14] = "/hello";
-  char *hello = "/hello";
-  char *another = "/another";
-  char *world = "/hello/world";
-  char *buf = calloc(15, 1);
-  int handle;
+  char pathname[80] = {'\0'};
+  char buf[80] = {'\0'};
+  int i = 0, handle = -1;
   rd_init();
-
-  printf("Try to create %s , got return: %d\n", hello, rd_mkdir(hello));
-  printf("Try to create %s , got return: %d\n", another, rd_mkdir(another));
-  printf("Try to create %s , got return: %d\n", world, rd_mkdir(world));
-  if (((handle = rd_open(filename)) < 0)){
+ 
+  for (i = 0; i < 64 * 8; i++) {
+    sprintf(pathname, "/file%d", i);
+    printf("%d\n", rd_mkdir(pathname));
+  }
+  
+  if (((handle = rd_open("/")) < 0)){
     perror("Open\n");
-    }
-  printf("Handle %d\n", handle);
-  rd_readdir(handle, buf);
-  printf("About to print buf");
-  printf("%s\n", buf);
-  memset(buf, 0, 15);
-  rd_readdir(handle, buf);
-  printf("About to print buf");
-  printf("%s\n", buf);
-  
-  
-  /* if (argc > 1 && strcmp(argv[1], "c") == 0) */
-  /*   ioctl(fd, DBG_MK_FDT, NULL);   */
-  /* else if (argc > 1 && strcmp(argv[1], "d") == 0) { */
-  /*   ioctl(fd, DBG_RM_FDT, atoi(argv[2])); */
-  /* }else if (argc > 1 && strcmp(argv[1], "p") == 0) */
-  /*   ioctl(fd, DBG_PRINT_FDT_PIDS, NULL); */
-  /* else */
-  /*   printf("Usage: ./a.out [cdp] <pid> (only if deleting)\n"); */
+    exit(1);
+  } 
+
+  for (i = 0; i < 64 * 8; i++) {
+    rd_readdir(handle, buf);
+    printf("%s\n", buf);
+  }
 
   return 0;
 }
