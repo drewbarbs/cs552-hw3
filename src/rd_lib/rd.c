@@ -30,10 +30,12 @@ int rd_init()
 
 int rd_creat(char *pathname)
 {
+  int ret = 0;
   if (rd_init() < 0)
     return -1;
-  
-  return 0;
+  if ((ret = ioctl(rdfd, RD_CREAT, pathname)) < 0)
+    perror("rd_mkdir\n");
+  return ret;
 }
 
 int rd_mkdir(char *pathname)
@@ -138,12 +140,13 @@ int rd_readdir(int fd, char *address)
 int main(int argc, char *argv[])
 {
   char filename[14] = "/";
+  char *hello = "/hello";
   char *buf = calloc(15, 1);
   int handle;
   rd_init();
 
+  printf("Try to create got return: %d\n", rd_mkdir(hello));
   if (((handle = rd_open(filename)) < 0)){
-    printf("Handle %d\n", handle);  
     perror("Open\n");
     }
   printf("Handle %d\n", handle);
