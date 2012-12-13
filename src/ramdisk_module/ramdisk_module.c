@@ -440,17 +440,16 @@ static index_node_t *get_free_index_node()
   /* Look for an UNALLOCATED inode */
   for (i = 0; i < NUM_INODES; i++) {
     p = get_inode(i);
-    //if (write_trylock(&p->file_lock)) {
+    if (write_trylock(&p->file_lock)) {
       if (p->type == UNALLOCATED) {
-		  
-		new_inode = p;
-		new_inode->type = ALLOCATED;
-		//write_unlock(&new_inode->file_lock);
-		break;
+	new_inode = p;
+	new_inode->type = ALLOCATED;
+	write_unlock(&new_inode->file_lock);
+	break;
       } else {
-			//write_unlock(&p->file_lock);
-		}
-    //}
+	write_unlock(&p->file_lock);
+      }
+    }
   }
   /* We should have been able to find such an inode */
   if (new_inode == NULL) {
@@ -483,7 +482,7 @@ static index_node_t *get_parent_index_node(const char *pathname)
 
 static index_node_t *get_index_node(const char *pathname)
 {
-/*
+
   char *pathname_copy, *token, *tokenize;
   index_node_t *curr = index_nodes;
   directory_entry_t *dir_entry = NULL;
@@ -512,46 +511,39 @@ static index_node_t *get_index_node(const char *pathname)
   kfree(pathname_copy);
   if (token != NULL)
     return NULL;
-  return
 
-  return (token == NULL ? curr : NULL);*/
-  int i;
-  index_node_t *node = NULL;
+  return (token == NULL ? curr : NULL);
+  /* int i; */
+  /* index_node_t *node = NULL; */
   
-  if (strlen(pathname) == 0)
-    return index_nodes;
+  /* if (strlen(pathname) == 0) */
+  /*   return index_nodes; */
   
-  char *parent_pathname = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
-  const char *filename = strrchr(pathname, '/') + 1;
-  int filename_length = strlen(filename);
-  if (filename_length < MAX_FILE_NAME_LEN) {
-    strncpy(parent_pathname, pathname, strlen(pathname) - filename_length - 1);
-    index_node_t *parent_node = get_index_node(parent_pathname);
-    if (parent_node != NULL) {
-      for (i = 0; i < parent_node->size / DIR_ENTRY_SZ; ++i) {
-	    directory_entry_t *entry = get_directory_entry(parent_node, i);
-	    if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) {
-		  node = get_inode(entry->index_node_number);
-		  break;
-		}
-	  }
-	}  
-  }
-  kfree(parent_pathname);
-  return node;
+  /* char *parent_pathname = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL); */
+  /* const char *filename = strrchr(pathname, '/') + 1; */
+  /* int filename_length = strlen(filename); */
+  /* if (filename_length < MAX_FILE_NAME_LEN) { */
+  /*   strncpy(parent_pathname, pathname, strlen(pathname) - filename_length - 1); */
+  /*   index_node_t *parent_node = get_index_node(parent_pathname); */
+  /*   if (parent_node != NULL) { */
+  /*     for (i = 0; i < parent_node->size / DIR_ENTRY_SZ; ++i) { */
+  /* 	    directory_entry_t *entry = get_directory_entry(parent_node, i); */
+  /* 	    if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) { */
+  /* 		  node = get_inode(entry->index_node_number); */
+  /* 		  break; */
+  /* 		} */
+  /* 	  } */
+  /* 	}   */
+  /* } */
+  /* kfree(parent_pathname); */
+  /* return node; */
 }
 
 static directory_entry_t* get_directory_entry(index_node_t* inode, int index)
 {
-	if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index)
-		return NULL;
-	
-	int direct_no = index / (BLK_SZ / DIR_ENTRY_SZ);
-	int entry_no = index % (BLK_SZ / DIR_ENTRY_SZ);
-	if (direct_no < DIRECT)
-		return (directory_entry_t *)(inode->direct[direct_no] + DIR_ENTRY_SZ * entry_no);
-	else
-		return NULL; // TODO: if direct_no is more than 8;
+  if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index)
+    return NULL;
+  return (directory_entry_t *)get_byte_address(inode, index * sizeof(directory_entry_t));
 }
 
 /*
@@ -746,6 +738,7 @@ static int rd_mkdir(const char *pathname)
     return -EINVAL;
   if (parent->size >= MAX_FILE_SIZE)
     return -EFBIG;
+  /* TODO: get filelock on parent */
   index_node_t *new_inode_ptr = get_free_index_node();
   if (new_inode_ptr == NULL)
 	return -EINVAL;
@@ -844,7 +837,10 @@ static int rd_unlink(const char *usr_str)
       if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) {
 	node = get_inode(entry->index_node_number);
 	if (node->type == DIR) {
-	  if (node->size != 0) return -EINVAL;
+	  if (node->size != 0) {
+	    kfree(pathname);
+	    return -EINVAL;
+	  }
 	} else {
 	  /* Release all datablocks */
 	  int num_blocks = node->size/ BLK_SZ;
