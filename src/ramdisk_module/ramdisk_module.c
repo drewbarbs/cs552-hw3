@@ -447,23 +447,25 @@ static index_node_t *get_free_index_node()
   /* Look for an UNALLOCATED inode */
   for (i = 0; i < NUM_INODES; i++) {
     p = get_inode(i);
-    if (write_trylock(&p->file_lock)) {
+    printk("Get_free_index_node checking if node %d (%p) is free\n", i,p);
+    //    if (write_trylock(&p->file_lock)) {
       if (p->type == UNALLOCATED) {
 	new_inode = p;
 	new_inode->type = ALLOCATED;
 	write_unlock(&new_inode->file_lock);
 	break;
       } else {
+	printk("Found node to be of type %d\n", p->type);
 	write_unlock(&p->file_lock);
       }
-    }
-  }
+  } 
+  //  }
   /* We should have been able to find such an inode */
   if (new_inode == NULL) {
     printk(KERN_ERR "get_free_index_node failed to find free inode,"
 	   " despite having first checked the super block counter\n");
   }
-
+  printk("Returning %p\n", new_inode);
   return new_inode;
 }
 
@@ -498,37 +500,51 @@ static index_node_t *get_index_node(const char *pathname)
   directory_entry_t *dir_entry = NULL;
   int i = 0;
   bool found_prev_inode = true; // start with index_nodes
-  printk("Printing entries in root index_node\n");
+  curr = index_nodes;
+  printk("Called get_index_node with pathname %s\n", pathname);
+  printk("Printing entries in root index_node %p\n", curr);
   for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
     dir_entry = get_directory_entry(curr, i);
-    printk("%s , inode # %d\n", dir_entry->filename, dir_entry->index_node_number);
+    printk("%s , inode # %d , address: %p , type : %d\n", dir_entry->filename, dir_entry->index_node_number, get_inode(dir_entry->index_node_number), get_inode(dir_entry->index_node_number)->type);
   }
 
-  if (strlen(pathname) == 2 && pathname[0] != '/')
+  if (strlen(pathname) == 1 && pathname[0] != '/')
     return NULL;
-  if (strlen(pathname) == 2 && pathname[0] == '/') { //strlen in kernel space -includes- trailing NULL
+  if (strlen(pathname) == 1 && pathname[0] == '/') { //strlen in kernel space -includes- trailing NULL
+    printk("Returning the root index node because I was aksed for %s\n", pathname);
     return index_nodes; // Points to root index node
   }
+  
   pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
   strncpy(pathname_copy, pathname, strlen(pathname));
   tokenize = pathname_copy + 1; // skip the first forward slash
+
   while ((token = strsep(&tokenize, "/")) != NULL) {
-    if (curr->type != DIR) {
+    if (curr->type != DIR || !found_prev_inode) {
+      printk("Breaking out\n");
       break;
     }
+    printk("Token is %s\n", token);
+    found_prev_inode = false;
     for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
       dir_entry = get_byte_address(curr, i * sizeof(directory_entry_t));
+      printk("Comparing to %s\n", dir_entry->filename);
       if (strncmp(dir_entry->filename, token, MAX_FILE_NAME_LEN) == 0) {
+	found_prev_inode = true;
 	curr = INODE_PTR(dir_entry->index_node_number);
 	break;
-      }
+      } 
     }
-  }
+  } 
   kfree(pathname_copy);
-  if (token != NULL)
-    return NULL;
-
-  return (token == NULL ? curr : NULL);
+  /* if (token != NULL) */
+  /*   return NULL; */
+  printk("Root inode: %p\n", index_nodes);
+  printk("inode 2: %p\n", (void *)index_nodes + INODE_SZ);
+  printk("inode 3: %p\n", (void *)index_nodes + 2 * INODE_SZ);
+  printk("Curr : %p\n", curr);
+  printk("Bool expression : %d\n", token == NULL && found_prev_inode);
+  return (token == NULL && found_prev_inode ? curr : NULL);
   /* int i; */
   /* index_node_t *node = NULL; */
   
@@ -557,8 +573,11 @@ static index_node_t *get_index_node(const char *pathname)
 
 static directory_entry_t* get_directory_entry(index_node_t* inode, int index)
 {
-  if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index)
+  if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index) {
+    printk("Inode %p\n", inode);
+    printk("Size  %d Type: %d\n", inode->size, inode->type);
     return NULL;
+  }
   return (directory_entry_t *)get_byte_address(inode, index * sizeof(directory_entry_t));
 }
 
@@ -570,6 +589,7 @@ static void *get_free_data_block()
 {
   unsigned long block_num = 0;
   void *block_address = NULL;
+  printk("Calling get_free_data_block, data_blocks : %p\n", data_blocks);
   spin_lock(&super_block_spinlock);
   if (super_block->num_free_blocks == 0) {
     spin_unlock(&super_block_spinlock);
@@ -578,17 +598,19 @@ static void *get_free_data_block()
   super_block->num_free_blocks--;  
   spin_unlock(&super_block_spinlock);
   spin_lock(&block_bitmap_spinlock);
-  block_num = find_first_bit(block_bitmap, NUM_BLKS_BITMAP * BLK_SZ * 8);
+  block_num = find_first_zero_bit(block_bitmap, NUM_BLKS_BITMAP * BLK_SZ * 8);
   if (block_num == NUM_BLKS_BITMAP * BLK_SZ * 8) {
     printk(KERN_ERR "Uh oh. The super block said there was a free block, "
 	   "but the block bitmap says otherwise...\n");
     spin_unlock(&block_bitmap_spinlock);
     return NULL;
   }
+  printk("Got zero bit at block num %d\n", block_num);
   set_bit(block_num, block_bitmap);
   spin_unlock(&block_bitmap_spinlock);
   block_address = data_blocks + block_num * BLK_SZ;
   memset(block_address, 0, BLK_SZ);
+  printk("Get free data block returning with %p\n", block_address);
   return block_address;
 }
 
@@ -740,7 +762,7 @@ static int rd_creat(const char *usr_str)
 
 static int rd_mkdir(const char *usr_str)
 {
-  index_node_t new_index_node = {
+  const index_node_t new_index_node = {
     .type = DIR,
     .size = 0,
     .file_lock = RW_LOCK_UNLOCKED,
@@ -777,8 +799,10 @@ static int rd_mkdir(const char *usr_str)
   if (new_inode_ptr == NULL)
 	return -EINVAL;
   *new_inode_ptr = new_index_node;
+  printk("New inode %p for %s has type %d\n", new_inode_ptr, pathname, new_inode_ptr->type);
   directory_entry_t *entry;
   if (parent->size % BLK_SZ == 0) {
+    printk("mkdir about to ask for new data_block for %s\n", pathname);
     entry = get_free_data_block();
     if (parent->size < DIRECT * DIR_ENTRIES_PB){
       parent->direct[parent->size / BLK_SZ] = entry;
@@ -835,9 +859,12 @@ static int rd_mkdir(const char *usr_str)
   } else {
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
   }
-  entry->index_node_number = (new_inode_ptr - index_nodes) / INODE_SZ;
+  printk("Entry address %p\n", entry);
+  entry->index_node_number = ((void *) new_inode_ptr - (void *)index_nodes) / INODE_SZ;
   printk("Got index node number :%d for %s", entry->index_node_number, strrchr(pathname, '/') + 1);
- strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
+  printk("Current filename : %s\n", entry->filename);
+  strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
+  printk("New filename : %s\n", entry->filename);
   parent->size += DIR_ENTRY_SZ;
   kfree(pathname);
   return 0;
@@ -845,7 +872,7 @@ static int rd_mkdir(const char *usr_str)
 
 static index_node_t *get_inode(size_t index)
 {
-	return (index_node_t *)(index_nodes + INODE_SZ * index);
+  return (index_node_t *)(((void*)index_nodes) + INODE_SZ * index);
 }
 
 static int rd_unlink(const char *usr_str)
@@ -972,6 +999,7 @@ static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
   int i, status = 0;
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   rd_readdir_arg_t *read_arg= NULL;
+  directory_entry_t *entry = NULL;
   if (fdt == NULL)
     return -1;
   read_arg = kcalloc(1, sizeof(rd_readdir_arg_t), GFP_KERNEL);
@@ -987,8 +1015,14 @@ static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
     return -1;
   /* Check if we're at EOF */
   if (fo.index_node->size == 0 || fo.index_node->size == fo.file_position)
-    return 0; 	
-  directory_entry_t *entry = get_directory_entry(fo.index_node, fo.file_position / DIR_ENTRY_SZ);
+    return 0;
+  printk("Fo has index node : %p\n", fo.index_node);
+  printk("inode->direct[0]: %p\n", fo.index_node->direct[0]);
+  printk("Filename at that address : %s\n", ((directory_entry_t *) fo.index_node->direct[0])->filename);
+  printk("Fileposition in inode address: %d\n", fo.file_position);
+  entry = get_directory_entry(fo.index_node, fo.file_position / DIR_ENTRY_SZ);
+  printk("Reading entry %p\n", entry);
+  printk("Filename : %s\n", entry->filename);
   /* usr_arg->address = entry->filename; */
   status = copy_to_user(read_arg->address, entry->filename, MAX_FILE_NAME_LEN);
   fo.file_position += DIR_ENTRY_SZ;
