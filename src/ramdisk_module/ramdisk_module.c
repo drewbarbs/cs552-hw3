@@ -198,9 +198,14 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   case RD_CREAT:
     //
     break;
+  case RD_OPEN:
+    printk("Called rd_open\n");
+    printk("%p\n", arg);
+    return rd_open(current->pid, (char *) arg);
   case RD_MKDIR:
-    
     break;
+  case RD_READDIR:
+    return rd_readdir(current->pid, (rd_readdir_arg_t *) arg);
   case DBG_PRINT_FDT_PIDS:
     debug_print_fdt_pids();
     break;
@@ -219,6 +224,7 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   /*   printk(KERN_DEBUG "This block ends at %p\n", offset_info.block_end); */
   /*   break; */
   default:
+    printk("Unrecognized cmd %u\n", cmd);
     return -EINVAL;
   }
   return 0;
@@ -271,9 +277,12 @@ static int create_file_descriptor_table(pid_t pid)
 
   /* Insert new fdt into file_descriptor_tables_list */
   write_lock(&file_descriptor_tables_rwlock);
+  printk("about to list_add\n");
   list_add(&fdt->list, &file_descriptor_tables);
+  printk("about to unlock\n");
   write_unlock(&file_descriptor_tables_rwlock);
-  return 0;
+  printk("about to return\n"); 
+  return fdt;
 }
 
 /*
@@ -282,15 +291,18 @@ static int create_file_descriptor_table(pid_t pid)
  */
 static file_descriptor_table_t *get_file_descriptor_table(pid_t pid)
 {
-  file_descriptor_table_t *p = NULL, *target = NULL;
-  read_lock(&file_descriptor_tables_rwlock);
-  list_for_each_entry(p, &file_descriptor_tables, list) {
-    if (p->owner == pid) {
-      target = p;
-      break;
-    }
-  }
-  read_unlock(&file_descriptor_tables_rwlock);  
+file_descriptor_table_t *p = NULL, *target = NULL;
+ printk("Called get fdt's\n");
+ read_lock(&file_descriptor_tables_rwlock);
+ printk("Got read_lock\n");
+ list_for_each_entry(p, &file_descriptor_tables, list) {
+   if (p!=NULL && p->owner == pid) {
+     target = p;
+     break;
+   }
+ }
+ printk("about to release read_lock");
+ read_unlock(&file_descriptor_tables_rwlock);  
   return target;
 }
 
@@ -338,9 +350,11 @@ static int create_file_descriptor_table_entry(file_descriptor_table_t *fdt,
     /* TODO: write_unlock(fdt_rwlock) */
     return -ENOMEM; /* TODO: in this case, try to allocate larger array/cpy old one */
   }  
+  printk("fdt->entries: %p", fdt->entries);
   /* Search for empty entry in array, assumes that all empty entries are null'd out */
   for (entry_index = 0; entry_index < fdt->entries_length; entry_index++) {
-    p = fdt->entries + entry_index;
+    p = (fdt->entries) + entry_index;
+    printk("Pointer %p\n", p);
     if (p->index_node == NULL) {
       dest = p;
       break;
@@ -490,9 +504,11 @@ static index_node_t *get_index_node(const char *pathname)
 
   if (strlen(pathname) == 0)
     return NULL;
-  if (strlen(pathname) == 1 && pathname[0] == '/')
+  if (strlen(pathname) == 1 && pathname[0] == '/') {
+    printk("About to return index_nodes\n");
     return index_nodes; // Points to root index node
-  
+  }  else
+    printk("%c\n", pathname[0]);
   pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
   strncpy(pathname_copy, pathname, strlen(pathname));
   tokenize = pathname_copy + 1; // skip the first forward slash
@@ -825,7 +841,7 @@ static index_node_t *get_inode(size_t index)
 
 static int rd_unlink(const char *usr_str)
 {	
- int i;
+  int i;
   char *pathname = NULL;
   size_t usr_strlen = strlen_user(usr_str);
   index_node_t *node = NULL;
@@ -900,18 +916,42 @@ static int rd_unlink(const char *usr_str)
   return 0;
 }
 
-static int rd_open(const pid_t pid, const char *pathname)
+static int rd_open(const pid_t pid, const char *usr_str)
 {
  /*TODO: acquire readlock on index node */
+  char *pathname = NULL;
+  size_t usr_strlen = strlen_user(usr_str);
+  int ret;
+  printk("Opening .. %d\n", usr_strlen);
+  pathname = kcalloc(usr_strlen, sizeof(char), GFP_KERNEL);
+  strncpy_from_user(pathname, usr_str, usr_strlen);
+  printk("Opening %s\n", pathname);
+  /* Remove trailing forward slash, if it exists */
+  if (usr_strlen > 2 && pathname[usr_strlen-1] == '/')
+    pathname[usr_strlen-1] = '\0';
+  
   index_node_t *node = get_index_node(pathname);
+  kfree(pathname);
   if (node == NULL)
     return -EINVAL;
   file_object_t new_fo = {
     .index_node = node,
     .file_position = 0
   };
+  printk("about to call get_fdt\n");
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
-  return create_file_descriptor_table_entry(fdt, new_fo);
+  if (fdt == NULL) {
+     printk("about to call create fdt");
+    fdt = create_file_descriptor_table(pid);
+  }
+  if (fdt == NULL) {
+    printk("Failed to create fdt for process %d\n", pid);
+    return -1;
+  }
+  printk("about to call create fdt e");
+  ret = create_file_descriptor_table_entry(fdt, new_fo);
+  printk("Got table entry index %d", ret);
+  return ret;
 }
 
 static int rd_close(const pid_t pid, const int fd)
@@ -926,25 +966,36 @@ static int rd_close(const pid_t pid, const int fd)
 
 static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
 {
-  int i;
+  int i, status = 0;
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
+  rd_readdir_arg_t *read_arg= NULL;
+  printk("Calling readdir\n");
   if (fdt == NULL)
-    return -1;	
-  file_object_t fo = get_file_descriptor_table_entry(fdt, usr_arg->fd);
+    return -1;
+  read_arg = kcalloc(1, sizeof(rd_readdir_arg_t), GFP_KERNEL);
+  if (read_arg == NULL)
+    return -1;
+  copy_from_user(read_arg, usr_arg, sizeof(rd_readdir_arg_t));
+  if (status != 0 || !access_ok(VERIFY_WRITE, usr_arg->address, MAX_FILE_NAME_LEN)) {
+    kfree(read_arg);
+    return -EINVAL;
+  }
+  
+  file_object_t fo = get_file_descriptor_table_entry(fdt, read_arg->fd);
   if (fo.index_node == NULL)
     return -1;
   /* Check if we're at EOF */
   if (fo.index_node->size == 0 || fo.index_node->size == fo.file_position)
-    return 0; 
-  if (!access_ok(VERIFY_WRITE, usr_arg->address, MAX_FILE_NAME_LEN))
-    return -EINVAL;
-	
+    return 0; 	
   directory_entry_t *entry = get_directory_entry(fo.index_node, fo.file_position / DIR_ENTRY_SZ);
-
+  printk("Got entry with filename %s\n", entry->filename);
   /* usr_arg->address = entry->filename; */
-  copy_to_user(usr_arg->address, entry->filename, MAX_FILE_NAME_LEN);
+  status = copy_to_user(read_arg->address, entry->filename, MAX_FILE_NAME_LEN);
+  printk("copy to user returned %d\n", status);
   fo.file_position += DIR_ENTRY_SZ;
-  set_file_descriptor_table_entry(fdt, usr_arg->fd, fo);
+  set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
+  kfree(read_arg);
+  printk("About to return from rd_readdir\n");
   return 1;
 }
 
