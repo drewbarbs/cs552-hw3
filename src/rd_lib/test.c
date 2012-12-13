@@ -1,11 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "rd.h"
+//#include "rd.h"
+#include "../ramdisk_module/ramdisk_module.h"
 
 int main() {
-  /* char tokenize_me[] = {"/drew/documents/file"}; */
-  char *to_print = NULL;
+
 
   char pathname[] = "/dir/doc/file";
   /* const char *pathname_copy = pathname; */
@@ -20,20 +20,3 @@ int main() {
   return 0;
 }
 
-
-/* for (i = 0; i < current->size / sizeof(directory_entry_t); i++) { */
-/*   if (i % DIR_ENTRIES_PB == 0) { */
-/*     if (i < DIRECT * DIR_ENTRIES_PB) { */
-/*       block_ptr = current->direct[i/DIR_ENTRIES_PB]; */
-/*     } else if (i < DIR_ENTRIES_PB * (DIRECT + PTRS_PB)) { */
-      
-/*     } */
-/*   } */
-  /* if (block_ptr[i].filename is equal to token) {
-       current_index_node_number = block_ptr[i].index_node_number;
-       current
-     }
-     *
-
-  
-     }*/
