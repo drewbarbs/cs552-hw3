@@ -12,6 +12,7 @@ Synchronization Primitives:
 	- currently have rw_lock_t protecting the index_nodes and data_blocks arrays, could make locking finer grained for better write performance
 
 TODO:
+- checkout what the deal with write_trylock on file_lock is in get_free_index_node
 - Make create_file_descriptor_table_entry allocate a -new- block of memory for fdt's if we run out of space
 -Making the ramdisk threadsafe:
 	- add fdt-level locks: need to be held for create/remove fd table/entry, add entry, set entry

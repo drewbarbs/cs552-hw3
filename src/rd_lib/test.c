@@ -8,8 +8,8 @@ int main() {
   char *to_print = NULL;
 
   char pathname[] = "/dir/doc/file";
-  const char *pathname_copy = pathname;
-  char *tokenize = pathname_copy + 1;
+  /* const char *pathname_copy = pathname; */
+  /* char *tokenize = pathname_copy + 1; */
   /* char *pathname_copy = calloc(strlen(pathname) + 1, sizeof(char)); */
   /* strncpy(pathname_copy, pathname, strlen(pathname) - strlen(strrchr(pathname, '/'))); */
   /* while ((to_print = strsep(&tokenize, "/")) != NULL) { */

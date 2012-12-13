@@ -769,7 +769,7 @@ static int rd_unlink(const char *usr_str)
   int num_blocks, i = 0, j = 0, bytes_defragged = 0;
   size_t usr_strlen = strlen_user(usr_str);
   bool block_empty = true;
-  const index_node_t clean_inode = { .type = DIR,
+  const index_node_t clean_inode = { .type = UNALLOCATED,
 				    .size = 0,
 				    .file_lock = RW_LOCK_UNLOCKED,
 				    .direct = { NULL },
