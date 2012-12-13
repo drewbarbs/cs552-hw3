@@ -448,7 +448,7 @@ static index_node_t *get_free_index_node()
   for (i = 0; i < NUM_INODES; i++) {
     p = get_inode(i);
     printk("Get_free_index_node checking if node %d (%p) is free\n", i,p);
-    //    if (write_trylock(&p->file_lock)) {
+    if (write_trylock(&p->file_lock)) {
       if (p->type == UNALLOCATED) {
 	new_inode = p;
 	new_inode->type = ALLOCATED;
@@ -458,8 +458,11 @@ static index_node_t *get_free_index_node()
 	printk("Found node to be of type %d\n", p->type);
 	write_unlock(&p->file_lock);
       }
-  } 
-  //  }
+    } else {
+  printk("Type: %d, Size : %d, file_lock: %p, direct[0] %p\n", p->type,
+	 p->size, p->file_lock, p->direct[0]);
+    }
+  }
   /* We should have been able to find such an inode */
   if (new_inode == NULL) {
     printk(KERN_ERR "get_free_index_node failed to find free inode,"
@@ -672,6 +675,7 @@ int rd_init()
 				    .single_indirect = NULL,
 				    .double_indirect = NULL};
   int i = 0;
+  index_node_t *inode = NULL;
   if (rd_initialized()) {
     return -EALREADY;
   }
@@ -691,7 +695,8 @@ int rd_init()
   rd_initialized_flag = true;
   index_nodes[0] = root_inode;
   for (i = 1; i < NUM_INODES; i++) {
-    index_nodes[i] = regular_inode;
+    inode = get_inode(i);
+   *inode = regular_inode;
   }
   write_unlock(&rd_init_rwlock);
   return 0;
