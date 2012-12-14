@@ -1066,9 +1066,57 @@ static int rd_close(const pid_t pid, const int fd)
   return delete_file_descriptor_table_entry(fdt, fd);
 }
 
+/* static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg) */
+/* { */
+  
+/* } */
+
+static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
+{
+  rd_rwfile_arg_t *write_arg = NULL;
+  unsigned long data_left_to_write = 0,
+    amt_to_copy = 0,
+    space_remaining_at_dest = 0,
+    num_copied = 0,
+    num_not_copied = 0;
+  void *curr_offset_address = NULL, *dest = NULL, *from = NULL;
+  index_node_t *inode = NULL;
+  file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
+  if (fdt == NULL)
+    return -1;
+  
+  write_arg = kcalloc(1, sizeof(rd_readdir_arg_t), GFP_KERNEL);
+  if (write_arg == NULL)
+    return -1;
+  num_not_copied = copy_from_user(write_arg, usr_arg, sizeof(rd_rwfile_arg_t));
+  if (num_not_copied != 0 || write_arg->num_bytes < 0) {
+    kfree(write_arg);
+    return -EINVAL;
+  }
+  data_left_to_write  = write_arg->num_bytes;
+  from = write_arg->address;
+  file_object_t fo = get_file_descriptor_table_entry(fdt, write_arg->fd);
+  if (fo.index_node == NULL || fo.index_node->type != REG) {
+    kfree(write_arg);
+    return -EINVAL;
+  }
+  inode = fo.index_node;
+  
+  /* while (...) {...} */
+
+  
+  return write_arg->num_bytes - data_left_to_write;
+  
+}
+
+/* static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg) */
+/* { */
+/* } */
+
 static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
 {
-  int i, status = 0;
+  int i = 0;
+  unsigned long num_not_copied = 0;
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   rd_readdir_arg_t *read_arg= NULL;
   directory_entry_t *entry = NULL;
@@ -1077,19 +1125,27 @@ static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
   read_arg = kcalloc(1, sizeof(rd_readdir_arg_t), GFP_KERNEL);
   if (read_arg == NULL)
     return -1;
-  copy_from_user(read_arg, usr_arg, sizeof(rd_readdir_arg_t));
-  if (status != 0 || !access_ok(VERIFY_WRITE, usr_arg->address, MAX_FILE_NAME_LEN)) {
+  num_not_copied = copy_from_user(read_arg, usr_arg, sizeof(rd_readdir_arg_t));
+  if (num_not_copied != 0) {
     kfree(read_arg);
     return -EINVAL;
   }
   file_object_t fo = get_file_descriptor_table_entry(fdt, read_arg->fd);
-  if (fo.index_node == NULL)
-    return -1;
+  if (fo.index_node == NULL || fo.index_node->type != DIR) {
+    kfree(read_arg);
+    return -EINVAL;
+  }
   /* Check if we're at EOF */
-  if (fo.index_node->size == 0 || fo.index_node->size == fo.file_position)
+  if (fo.index_node->size == 0 || fo.index_node->size == fo.file_position) {
+    kfree(read_arg);
     return 0;
+  }
   entry = get_directory_entry(fo.index_node, fo.file_position / DIR_ENTRY_SZ);
-  status = copy_to_user(read_arg->address, entry->filename, MAX_FILE_NAME_LEN);
+  num_not_copied = copy_to_user(read_arg->address, entry->filename, MAX_FILE_NAME_LEN);
+  if (num_not_copied != 0) {
+    kfree(read_arg);
+    return -EINVAL;
+  }
   fo.file_position += DIR_ENTRY_SZ;
   set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
   kfree(read_arg);
