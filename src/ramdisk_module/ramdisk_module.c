@@ -200,8 +200,12 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
     return rd_open(current->pid, (char *) arg);
   case RD_CLOSE:
     return rd_close(current->pid, (int) arg);
+  case RD_READ:
+    return rd_read(current->pid, (rd_rwfile_arg_t *) arg);
   case RD_WRITE:
     return rd_write(current->pid, (rd_rwfile_arg_t *) arg);
+  case RD_LSEEK:
+    return rd_lseek(current->pid, (rd_seek_arg_t *) arg);
   case RD_UNLINK:
     return rd_unlink((char *) arg);
   case RD_READDIR:
@@ -1073,6 +1077,64 @@ static int rd_close(const pid_t pid, const int fd)
   
 /* } */
 
+static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
+{
+  rd_rwfile_arg_t *read_arg = NULL;
+  unsigned long data_left_to_read = 0,
+    bytes_until_end_of_block = 0,
+    bytes_left_in_file = 0,
+    amt_to_be_read_at_address = 0,
+    amt_to_copy = 0,
+    num_copied = 0,
+    num_not_copied = 0;
+  void *dest = NULL, *from = NULL;
+  index_node_t *inode = NULL;
+  /* Make sure the process has a file descriptor table */
+  file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
+  if (fdt == NULL)
+    return -1;
+  
+  /* Copy argument from user space, check validity */
+  read_arg = kcalloc(1, sizeof(rd_rwfile_arg_t), GFP_KERNEL);
+  if (read_arg == NULL)
+    return -1;
+  num_not_copied = copy_from_user(read_arg, usr_arg, sizeof(rd_rwfile_arg_t));
+  if (num_not_copied != 0 || read_arg->num_bytes < 0) {
+    kfree(read_arg);
+    return -EINVAL;
+  }
+  data_left_to_read  = read_arg->num_bytes;
+  dest = read_arg->address;
+  file_object_t fo = get_file_descriptor_table_entry(fdt, read_arg->fd);
+  if (fo.index_node == NULL || fo.index_node->type != REG) {
+    kfree(read_arg);
+    return -EINVAL;
+  }
+  inode = fo.index_node;
+
+  /* Read data */
+  while (data_left_to_read > 0) {
+    if (fo.file_position == inode->size) // file_position is at EOF
+      break;
+
+    from = get_byte_address(inode, fo.file_position);
+    bytes_until_end_of_block = (unsigned long) BLOCK_END(from) - (unsigned long) from;
+    bytes_left_in_file = inode->size - fo.file_position;
+    amt_to_be_read_at_address = min(bytes_until_end_of_block, bytes_left_in_file);
+    amt_to_copy = min(amt_to_be_read_at_address, data_left_to_read);
+				    
+    num_not_copied = copy_to_user(dest, from, amt_to_copy);
+    num_copied = amt_to_copy - num_not_copied;
+    data_left_to_read -= num_copied;
+    dest += num_copied;
+    fo.file_position += num_copied;
+    if (num_not_copied > 0) break;
+  }
+  set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
+  kfree(read_arg);
+  return read_arg->num_bytes - data_left_to_read;
+}
+
 static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 {
   rd_rwfile_arg_t *write_arg = NULL;
@@ -1089,7 +1151,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -1;
   
   /* Copy argument from user space, check validity */
-  write_arg = kcalloc(1, sizeof(rd_readdir_arg_t), GFP_KERNEL);
+  write_arg = kcalloc(1, sizeof(rd_rwfile_arg_t), GFP_KERNEL);
   if (write_arg == NULL)
     return -1;
   num_not_copied = copy_from_user(write_arg, usr_arg, sizeof(rd_rwfile_arg_t));
@@ -1143,14 +1205,41 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     if (num_not_copied > 0) break;
   }
   set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
-  
+  kfree(write_arg);
   return write_arg->num_bytes - data_left_to_write;
   
 }
 
-/* static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg) */
-/* { */
-/* } */
+static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg)
+{
+  rd_seek_arg_t *seek_arg = NULL;
+  unsigned long num_not_copied = 0;
+  /* Make sure the process has a file descriptor table */
+  file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
+  if (fdt == NULL)
+    return -1;
+  
+  /* Copy argument from user space, check validity */
+  seek_arg = kcalloc(1, sizeof(rd_seek_arg_t), GFP_KERNEL);
+  if (seek_arg == NULL)
+    return -1;
+  num_not_copied = copy_from_user(seek_arg, usr_arg, sizeof(rd_seek_arg_t));
+  if (num_not_copied != 0 || seek_arg->offset < 0) {
+    kfree(seek_arg);
+    return -EINVAL;
+  }
+
+  file_object_t fo = get_file_descriptor_table_entry(fdt, seek_arg->fd);
+  if (fo.index_node == NULL || fo.index_node->type != REG ||
+      seek_arg->offset > fo.index_node->size) {
+    kfree(seek_arg);
+    return -EINVAL;
+  }
+  fo.file_position = seek_arg->offset;
+  set_file_descriptor_table_entry(fdt, seek_arg->fd, fo);
+  kfree(seek_arg);
+  return 0;
+}
 
 static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
 {
