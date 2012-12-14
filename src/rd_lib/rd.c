@@ -144,7 +144,8 @@ int main(int argc, char *argv[])
   int i = 0, handle = -1;
   rd_init();
  
-  for (i = 0; i < 64 * 8; i++) {
+  //  for (i = 0; i < 16 * (8 + 64 + 64*64); i++) {
+    for (i = 0; i < 1023; i++) {
     sprintf(pathname, "/file%d", i);
     printf("%d\n", rd_mkdir(pathname));
   }
@@ -152,13 +153,13 @@ int main(int argc, char *argv[])
   if (((handle = rd_open("/")) < 0)){
     perror("Open\n");
     exit(1);
-  } 
-
-  for (i = 0; i < 64 * 8; i++) {
-    rd_readdir(handle, buf);
-    printf("%s\n", buf);
   }
 
+  /* //  for (i = 0; i < 16 * (8 + 64 + 64*64); i++) { */
+  for (i = 0; i < 1023; i++) {
+    rd_readdir(handle, buf);
+    printf("%s | ", buf);
+  }
   return 0;
 }
 #endif

@@ -87,7 +87,7 @@ static void *data_blocks = NULL; // len(data_blocks) == 7931 blocks
 static int temp = 0;
 static LIST_HEAD(file_descriptor_tables);
 
-#define INODE_PTR(index) ((void *) index_nodes + index * INODE_SZ)
+#define INODE_PTR(index) (index_node_t *) (((void *) index_nodes) + index * INODE_SZ)
 #define BLOCK_START(byte_address) ((void *)byte_address - (((unsigned long) ((void *)byte_address - data_blocks)) % BLK_SZ))
 #define BLOCK_END(byte_address) (BLOCK_START(byte_address) + BLK_SZ)
 
@@ -102,7 +102,7 @@ static LIST_HEAD(file_descriptor_tables);
  */
 static int procfs_open(struct inode *inode, struct file *file)
 {
-  printk(KERN_DEBUG "Ramdisk module opening by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
+  //printk(KERN_DEBUG "Ramdisk module opening by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
   try_module_get(THIS_MODULE);
   return 0;
 }
@@ -116,7 +116,7 @@ static int procfs_close(struct inode *inode, struct file *file)
   int i = 0;
   file_descriptor_table_t *fdt = NULL;
   file_object_t fo;
-  printk(KERN_DEBUG "Ramdisk module being closed by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
+  //printk(KERN_DEBUG "Ramdisk module being closed by %d (parent %d, real_parent %d, thread group %d)\n", current->pid, current->parent->pid, current->real_parent->pid, current->tgid);
   fdt =  get_file_descriptor_table(current->pid);
   /* Here, I assume that the no other thread will be accessing this fdt */
   if (fdt != NULL) {
@@ -133,11 +133,12 @@ static int procfs_close(struct inode *inode, struct file *file)
 static int __init initialization_routine(void) {
   printk(KERN_INFO "Loading ramdisk module\n");
   ramdisk_file_ops.ioctl = ramdisk_ioctl;
+  
 
   /* Start create proc entry */
   proc_entry = create_proc_entry("ramdisk", 0444, NULL);
   if(!proc_entry) {
-    printk(KERN_ERR "Error creating /proc entry. \n");
+    //printk(KERN_ERR "Error creating /proc entry. \n");
     return 1;
   }
   proc_entry->proc_fops = &ramdisk_file_ops;
@@ -153,18 +154,18 @@ static void __exit cleanup_routine(void) {
    */
   file_descriptor_table_t *p = NULL, *next = NULL;
   remove_proc_entry("ramdisk", NULL);
-  printk(KERN_INFO "Cleaning up ramdisk module\n");
+  //printk(KERN_INFO "Cleaning up ramdisk module\n");
   /* The only other persistent, dynamically allocated
    * memory in the ramdisk is used for fdt's, all of 
    * which should have been destroyed in order for us
    * to reach this point. We will double check anyways.
    */
   list_for_each_entry_safe(p, next, &file_descriptor_tables, list) {
-    printk(KERN_DEBUG "Deleting fdt for process %d\n", p->owner);
+    //printk(KERN_DEBUG "Deleting fdt for process %d\n", p->owner);
     delete_file_descriptor_table(p->owner);
   }
   if (super_block != NULL) {
-    printk(KERN_INFO "Freeing ramdisk memory\n");
+    //printk(KERN_INFO "Freeing ramdisk memory\n");
     vfree(super_block);
   }
   return;
@@ -178,9 +179,9 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
 			 unsigned int cmd, unsigned long arg) 
 {
   offset_info_t offset_info;
-  printk(KERN_INFO "Called ioctl\n");
+  //printk(KERN_INFO "Called ioctl\n");
   if (cmd != RD_INIT && !rd_initialized()) {
-    printk(KERN_ERR "Ramdisk called before being initialized\n");
+    //printk(KERN_ERR "Ramdisk called before being initialized\n");
     return -1;
   }
   
@@ -225,7 +226,7 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   /*   printk(KERN_DEBUG "This block ends at %p\n", offset_info.block_end); */
   /*   break; */
   default:
-    printk("Unrecognized cmd %u\n", cmd);
+    //printk("Unrecognized cmd %u\n", cmd);
     return -EINVAL;
   }
   return 0;
@@ -252,19 +253,19 @@ static int create_file_descriptor_table(pid_t pid)
 
   /* Check if a file descriptor table for this process already exists */
   if (get_file_descriptor_table(pid) != NULL) {
-    printk(KERN_ERR "Attempted to create fdt for process %d that already has one\n", pid);
+    //printk(KERN_ERR "Attempted to create fdt for process %d that already has one\n", pid);
     return -EEXIST;
   }
   
   /* Allocate memory for the new file descriptor table, return on failure */
   fdt = (file_descriptor_table_t *) kmalloc(sizeof(file_descriptor_table_t), GFP_KERNEL);
   if (fdt == NULL) {
-    printk(KERN_ERR "Failed to allocate fdt for process %d\n", pid);
+    //printk(KERN_ERR "Failed to allocate fdt for process %d\n", pid);
     return -ENOMEM;
   }
   entries = (file_object_t *) kmalloc(init_num_entry_bytes, GFP_KERNEL);
   if (entries == NULL) {
-    printk(KERN_ERR "Failed to allocate entries array for fdt for process %d\n", pid);
+    //printk(KERN_ERR "Failed to allocate entries array for fdt for process %d\n", pid);
     kfree(fdt);
     return -ENOMEM;
   }
@@ -307,7 +308,7 @@ file_descriptor_table_t *p = NULL, *target = NULL;
 static void delete_file_descriptor_table(pid_t pid) {
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   if (fdt == NULL) {
-    printk(KERN_ERR "Attempted to remove nonexistant fdt for process %d\n", pid);
+    //printk(KERN_ERR "Attempted to remove nonexistant fdt for process %d\n", pid);
     return;
   }
   /* Remove fdt from list */
@@ -321,10 +322,10 @@ static void delete_file_descriptor_table(pid_t pid) {
 
 static void debug_print_fdt_pids() {
   file_descriptor_table_t *p;
-  printk(KERN_DEBUG "About to print processes that have fdts");
+  //printk(KERN_DEBUG "About to print processes that have fdts");
   read_lock(&file_descriptor_tables_rwlock);
   list_for_each_entry(p, &file_descriptor_tables, list) {
-    printk(KERN_DEBUG "Process %d\n", p->owner);
+    //printk(KERN_DEBUG "Process %d\n", p->owner);
   }
   read_unlock(&file_descriptor_tables_rwlock);
 }
@@ -354,7 +355,7 @@ static int create_file_descriptor_table_entry(file_descriptor_table_t *fdt,
     }
   }
   if (dest == NULL) {
-    printk(KERN_ERR "Couldn't find empty entry, despite checking num_free_entries\n");
+    //printk(KERN_ERR "Couldn't find empty entry, despite num_free_entries returning\n");
     /* write_unlock(fdt_rwlock) */
     return -ENOMEM;
   }
@@ -447,7 +448,7 @@ static index_node_t *get_free_index_node()
   /* Look for an UNALLOCATED inode */
   for (i = 0; i < NUM_INODES; i++) {
     p = get_inode(i);
-    printk("Get_free_index_node checking if node %d (%p) is free\n", i,p);
+    //printk("Get_free_index_node checking if node %d (%p) is free\n", i,p);
     if (write_trylock(&p->file_lock)) {
       if (p->type == UNALLOCATED) {
 	new_inode = p;
@@ -455,20 +456,15 @@ static index_node_t *get_free_index_node()
 	write_unlock(&new_inode->file_lock);
 	break;
       } else {
-	printk("Found node to be of type %d\n", p->type);
 	write_unlock(&p->file_lock);
       }
-    } else {
-  printk("Type: %d, Size : %d, file_lock: %p, direct[0] %p\n", p->type,
-	 p->size, p->file_lock, p->direct[0]);
     }
   }
   /* We should have been able to find such an inode */
   if (new_inode == NULL) {
-    printk(KERN_ERR "get_free_index_node failed to find free inode,"
-	   " despite having first checked the super block counter\n");
+    //printk(KERN_ERR "get_free_index_node failed to find free inode,"
+    //	   " despite having first checked the super block counter: %d\n", super_block->num_free_inodes);
   }
-  printk("Returning %p\n", new_inode);
   return new_inode;
 }
 
@@ -504,17 +500,17 @@ static index_node_t *get_index_node(const char *pathname)
   int i = 0;
   bool found_prev_inode = true; // start with index_nodes
   curr = index_nodes;
-  printk("Called get_index_node with pathname %s\n", pathname);
-  printk("Printing entries in root index_node %p\n", curr);
+  //printk("Called get_index_node with pathname %s\n", pathname);
+  //printk("Printing entries in root index_node %p\n", curr);
   for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
     dir_entry = get_directory_entry(curr, i);
-    printk("%s , inode # %d , address: %p , type : %d\n", dir_entry->filename, dir_entry->index_node_number, get_inode(dir_entry->index_node_number), get_inode(dir_entry->index_node_number)->type);
+    //printk("%s , inode # %d , address: %p , type : %d\n", dir_entry->filename, dir_entry->index_node_number, get_inode(dir_entry->index_node_number), get_inode(dir_entry->index_node_number)->type);
   }
 
   if (strlen(pathname) == 1 && pathname[0] != '/')
     return NULL;
   if (strlen(pathname) == 1 && pathname[0] == '/') { //strlen in kernel space -includes- trailing NULL
-    printk("Returning the root index node because I was aksed for %s\n", pathname);
+    //printk("Returning the root index node because I was aksed for %s\n", pathname);
     return index_nodes; // Points to root index node
   }
   
@@ -524,14 +520,14 @@ static index_node_t *get_index_node(const char *pathname)
 
   while ((token = strsep(&tokenize, "/")) != NULL) {
     if (curr->type != DIR || !found_prev_inode) {
-      printk("Breaking out\n");
+      //printk("Breaking out\n");
       break;
     }
-    printk("Token is %s\n", token);
+    //printk("Token is %s\n", token);
     found_prev_inode = false;
     for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
       dir_entry = get_byte_address(curr, i * sizeof(directory_entry_t));
-      printk("Comparing to %s\n", dir_entry->filename);
+      //printk("Comparing to %s\n", dir_entry->filename);
       if (strncmp(dir_entry->filename, token, MAX_FILE_NAME_LEN) == 0) {
 	found_prev_inode = true;
 	curr = INODE_PTR(dir_entry->index_node_number);
@@ -542,11 +538,11 @@ static index_node_t *get_index_node(const char *pathname)
   kfree(pathname_copy);
   /* if (token != NULL) */
   /*   return NULL; */
-  printk("Root inode: %p\n", index_nodes);
-  printk("inode 2: %p\n", (void *)index_nodes + INODE_SZ);
-  printk("inode 3: %p\n", (void *)index_nodes + 2 * INODE_SZ);
-  printk("Curr : %p\n", curr);
-  printk("Bool expression : %d\n", token == NULL && found_prev_inode);
+  //printk("Root inode: %p\n", index_nodes);
+  //printk("inode 2: %p\n", (void *)index_nodes + INODE_SZ);
+  //printk("inode 3: %p\n", (void *)index_nodes + 2 * INODE_SZ);
+  //printk("Curr : %p\n", curr);
+  //printk("Bool expression : %d\n", token == NULL && found_prev_inode);
   return (token == NULL && found_prev_inode ? curr : NULL);
   /* int i; */
   /* index_node_t *node = NULL; */
@@ -577,8 +573,8 @@ static index_node_t *get_index_node(const char *pathname)
 static directory_entry_t* get_directory_entry(index_node_t* inode, int index)
 {
   if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index) {
-    printk("Inode %p\n", inode);
-    printk("Size  %d Type: %d\n", inode->size, inode->type);
+    //printk("Inode %p\n", inode);
+    //printk("Size  %d Type: %d\n", inode->size, inode->type);
     return NULL;
   }
   return (directory_entry_t *)get_byte_address(inode, index * sizeof(directory_entry_t));
@@ -592,7 +588,7 @@ static void *get_free_data_block()
 {
   unsigned long block_num = 0;
   void *block_address = NULL;
-  printk("Calling get_free_data_block, data_blocks : %p\n", data_blocks);
+  //printk("Calling get_free_data_block, data_blocks : %p\n", data_blocks);
   spin_lock(&super_block_spinlock);
   if (super_block->num_free_blocks == 0) {
     spin_unlock(&super_block_spinlock);
@@ -603,17 +599,17 @@ static void *get_free_data_block()
   spin_lock(&block_bitmap_spinlock);
   block_num = find_first_zero_bit(block_bitmap, NUM_BLKS_BITMAP * BLK_SZ * 8);
   if (block_num == NUM_BLKS_BITMAP * BLK_SZ * 8) {
-    printk(KERN_ERR "Uh oh. The super block said there was a free block, "
-	   "but the block bitmap says otherwise...\n");
+    //printk(KERN_ERR "Uh oh. The super block said there was a free block, "
+    //   "but the block bitmap says otherwise...\n");
     spin_unlock(&block_bitmap_spinlock);
     return NULL;
   }
-  printk("Got zero bit at block num %d\n", block_num);
+  //printk("Got zero bit at block num %d\n", block_num);
   set_bit(block_num, block_bitmap);
   spin_unlock(&block_bitmap_spinlock);
   block_address = data_blocks + block_num * BLK_SZ;
   memset(block_address, 0, BLK_SZ);
-  printk("Get free data block returning with %p\n", block_address);
+  //printk("Get free data block returning with %p\n", block_address);
   return block_address;
 }
 
@@ -626,7 +622,7 @@ static void release_data_block(void *data_block_ptr)
 {
   int block_num;
   if (data_block_ptr == NULL) {
-    printk(KERN_ERR "Asked to release NULL data block\n");
+    //printk(KERN_ERR "Asked to release NULL data block\n");
     return;
   }
   block_num = (data_block_ptr - data_blocks) / BLK_SZ;
@@ -680,16 +676,16 @@ int rd_init()
     return -EALREADY;
   }
   write_lock(&rd_init_rwlock);
-  printk(KERN_INFO "Initializing ramdisk\n");
+  //printk(KERN_INFO "Initializing ramdisk\n");
   super_block = (super_block_t *) vmalloc(RD_SZ);
   if (!super_block) {
-    printk(KERN_ERR "vmalloc for ramdisk space failed\n");
+    //printk(KERN_ERR "vmalloc for ramdisk space failed\n");
     write_unlock(&rd_init_rwlock);
     return -ENOMEM;
   }
   memset((void *) super_block, 0, RD_SZ);
   index_nodes = (index_node_t *) ((void *) super_block + BLK_SZ);
-  block_bitmap = ((void *)index_nodes + NUM_BLKS_INODE * INODE_SZ);
+  block_bitmap = ((void *)index_nodes + NUM_BLKS_INODE * BLK_SZ);
   data_blocks = block_bitmap + NUM_BLKS_BITMAP * BLK_SZ;
   *super_block = init_super_block;
   rd_initialized_flag = true;
@@ -804,10 +800,10 @@ static int rd_mkdir(const char *usr_str)
   if (new_inode_ptr == NULL)
 	return -EINVAL;
   *new_inode_ptr = new_index_node;
-  printk("New inode %p for %s has type %d\n", new_inode_ptr, pathname, new_inode_ptr->type);
+  //printk("New inode %p for %s has type %d\n", new_inode_ptr, pathname, new_inode_ptr->type);
   directory_entry_t *entry;
   if (parent->size % BLK_SZ == 0) {
-    printk("mkdir about to ask for new data_block for %s\n", pathname);
+    //printk("mkdir about to ask for new data_block for %s\n", pathname);
     entry = get_free_data_block();
     if (parent->size < DIRECT * BLK_SZ){
       parent->direct[parent->size / BLK_SZ] = entry;
@@ -857,19 +853,19 @@ static int rd_mkdir(const char *usr_str)
 	parent->double_indirect->indirect_blocks[indirect_block_index]
 	  ->data[index_in_indirect_block] = (void *) entry;
       } else {
-	printk(KERN_ERR "Unexpected case in mkdir\n");
+	//printk(KERN_ERR "Unexpected case in mkdir\n");
 	return -EFBIG;
       }
     }
   } else {
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
   }
-  printk("Entry address %p\n", entry);
+  //printk("Entry address %p\n", entry);
   entry->index_node_number = ((void *) new_inode_ptr - (void *)index_nodes) / INODE_SZ;
-  printk("Got index node number :%d for %s", entry->index_node_number, strrchr(pathname, '/') + 1);
-  printk("Current filename : %s\n", entry->filename);
+  //printk("Got index node number :%d for %s", entry->index_node_number, strrchr(pathname, '/') + 1);
+  //printk("Current filename : %s\n", entry->filename);
   strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
-  printk("New filename : %s\n", entry->filename);
+  //printk("New filename : %s\n", entry->filename);
   parent->size += DIR_ENTRY_SZ;
   kfree(pathname);
   return 0;
@@ -965,7 +961,7 @@ static int rd_open(const pid_t pid, const char *usr_str)
   int ret;
   pathname = kcalloc(usr_strlen, sizeof(char), GFP_KERNEL);
   strncpy_from_user(pathname, usr_str, usr_strlen);
-  printk("Opening %s\n", pathname);
+  //printk("Opening %s\n", pathname);
   /* Remove trailing forward slash, if it exists */
   if (usr_strlen > 2 && pathname[usr_strlen-1] == '/')
     pathname[usr_strlen-1] = '\0';
@@ -982,7 +978,7 @@ static int rd_open(const pid_t pid, const char *usr_str)
   if (fdt == NULL)
     fdt = create_file_descriptor_table(pid);
   if (fdt == NULL) {
-    printk("Failed to create fdt for process %d\n", pid);
+    //printk("Failed to create fdt for process %d\n", pid);
     return -1;
   }
   ret = create_file_descriptor_table_entry(fdt, new_fo);
@@ -1021,13 +1017,13 @@ static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
   /* Check if we're at EOF */
   if (fo.index_node->size == 0 || fo.index_node->size == fo.file_position)
     return 0;
-  printk("Fo has index node : %p\n", fo.index_node);
-  printk("inode->direct[0]: %p\n", fo.index_node->direct[0]);
-  printk("Filename at that address : %s\n", ((directory_entry_t *) fo.index_node->direct[0])->filename);
-  printk("Fileposition in inode address: %d\n", fo.file_position);
+  //printk("Fo has index node : %p\n", fo.index_node);
+  //printk("inode->direct[0]: %p\n", fo.index_node->direct[0]);
+  //printk("Filename at that address : %s\n", ((directory_entry_t *) fo.index_node->direct[0])->filename);
+  //printk("Fileposition in inode address: %d\n", fo.file_position);
   entry = get_directory_entry(fo.index_node, fo.file_position / DIR_ENTRY_SZ);
-  printk("Reading entry %p\n", entry);
-  printk("Filename : %s\n", entry->filename);
+  //printk("Reading entry %p\n", entry);
+  //printk("Filename : %s\n", entry->filename);
   /* usr_arg->address = entry->filename; */
   status = copy_to_user(read_arg->address, entry->filename, MAX_FILE_NAME_LEN);
   fo.file_position += DIR_ENTRY_SZ;
