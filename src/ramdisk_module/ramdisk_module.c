@@ -589,7 +589,7 @@ static void *extend_inode(index_node_t *inode)
       int indirect_block_index =
 	(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
       int index_in_indirect_block =
-	(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ);
+	((inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ)) / BLK_SZ;
       inode->double_indirect->indirect_blocks[indirect_block_index]
 	->data[index_in_indirect_block] = (void *) extending_block;
     } else if ((inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) == 0) {
@@ -602,6 +602,8 @@ static void *extend_inode(index_node_t *inode)
       int indirect_block_index =
 	(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
       int index_in_indirect_block = 0;
+      inode->double_indirect->indirect_blocks[indirect_block_index]
+	= indirect_block;
       inode->double_indirect->indirect_blocks[indirect_block_index]
 	->data[index_in_indirect_block] = (void *) extending_block;
     } else {
@@ -921,7 +923,6 @@ static int rd_unlink(const char *usr_str)
 	    release_data_block(block_to_release);
 	    num_blocks--;
 	  }
-	  printk("About to release all data blocks for file");
 	  if (node->double_indirect != NULL) {
 	    /* Need to release the double indirect block,
 	       and the single indirect blocks pointed to from it */
@@ -980,7 +981,7 @@ static int rd_unlink(const char *usr_str)
 		 ASSUMES DIRECTORY ENTRIES ARE NEVER FRAGMENTED - 
 		 THEY ARE ALWAYS IN A CONTIGUOUS BLOCK
 	      */
-	      release_data_block(parent_node->double_indirect[0]);
+	      release_data_block(parent_node->double_indirect->indirect_blocks[0]);
 	      release_data_block(parent_node->double_indirect);
 	      parent_node->double_indirect = NULL;
 	    } else if ((parent_node->size / BLK_SZ) % (PTRS_PB * BLK_SZ) != 0) {
@@ -988,10 +989,23 @@ static int rd_unlink(const char *usr_str)
 		 that pointed to the directory entry block we just
 		 released */
 	      int indirect_block_index =
-		(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
+		(parent_node->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
 	      int index_in_indirect_block =
-		((inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ))/ BLK_SZ;
-	      /*UNFINISHED */
+		((parent_node->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ))/ BLK_SZ;
+	      parent_node->double_indirect->indirect_blocks[indirect_block_index]
+		->data[index_in_indirect_block] = NULL;
+	    } else if ((parent_node->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) == 0) {
+	      /* Need to free the SINGLE_INDIRECT block that pointed to the
+		 directory entry block we just released, and 
+		 NULL out the entry in the DOUBLE_INDIRECT block
+		 that pointed to this SINGLE_INDIRECT block
+	      */
+	      int indirect_block_index =
+		(parent_node->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
+	      release_data_block(parent_node->double_indirect->indirect_blocks[indirect_block_index]);
+	      parent_node->double_indirect->indirect_blocks[indirect_block_index] = NULL;
+	    } else {
+	      printk(KERN_ERR "Encountered unexpected case in rd_unlink\n");
 	    }
 	  }
 	}
