@@ -194,12 +194,14 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
    break;
   case RD_CREAT:
     return rd_creat((char *) arg);
+  case RD_MKDIR:
+    return rd_mkdir((char *) arg);
   case RD_OPEN:
     return rd_open(current->pid, (char *) arg);
   case RD_CLOSE:
     return rd_close(current->pid, (int) arg);
-  case RD_MKDIR:
-    return rd_mkdir((char *) arg);
+  case RD_WRITE:
+    return rd_write(current->pid, (rd_rwfile_arg_t *) arg);
   case RD_UNLINK:
     return rd_unlink((char *) arg);
   case RD_READDIR:
@@ -1076,15 +1078,17 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   rd_rwfile_arg_t *write_arg = NULL;
   unsigned long data_left_to_write = 0,
     amt_to_copy = 0,
-    space_remaining_at_dest = 0,
+    space_available_at_dest = 0,
     num_copied = 0,
     num_not_copied = 0;
   void *curr_offset_address = NULL, *dest = NULL, *from = NULL;
   index_node_t *inode = NULL;
+  /* Make sure the process has a file descriptor table */
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   if (fdt == NULL)
     return -1;
   
+  /* Copy argument from user space, check validity */
   write_arg = kcalloc(1, sizeof(rd_readdir_arg_t), GFP_KERNEL);
   if (write_arg == NULL)
     return -1;
@@ -1101,9 +1105,40 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -EINVAL;
   }
   inode = fo.index_node;
-  
-  /* while (...) {...} */
 
+  /* Write data */
+  while (data_left_to_write > 0) {
+    if (fo.file_position == MAX_FILE_SIZE)
+      break;
+
+    if (fo.file_position == inode->size && inode->size % BLK_SZ == 0) {
+      /* We are writing past the current end of the last block of  file */
+      dest = extend_inode(inode);
+      if (dest == NULL)
+	break;
+
+      space_available_at_dest = BLK_SZ;
+      
+    } else {
+      curr_offset_address = get_byte_address(inode, inode->size - 1);
+      if (curr_offset_address == NULL) {
+	printk(KERN_ERR "Unexpected error in rd_write\n");
+	break;
+      }
+      dest = curr_offset_address + 1;
+      space_available_at_dest = (unsigned long) BLOCK_END(dest) - (unsigned long) dest;
+    }
+    amt_to_copy = min(data_left_to_write, space_available_at_dest);
+    num_not_copied = copy_from_user(dest, from, amt_to_copy);
+    num_copied = amt_to_copy - num_not_copied;
+    data_left_to_write -= num_copied;
+    from += num_copied;
+    fo.file_position += num_copied;
+    if ((inode->size - 1) < fo.file_position) // We wrote past original EOF
+      inode->size += fo.file_position - (inode ->size - 1);
+    if (num_not_copied > 0) break;
+  }
+  set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
   
   return write_arg->num_bytes - data_left_to_write;
   
