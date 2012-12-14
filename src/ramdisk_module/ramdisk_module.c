@@ -1113,6 +1113,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 
     if (fo.file_position == inode->size && inode->size % BLK_SZ == 0) {
       /* We are writing past the current end of the last block of  file */
+      printk("Getting new data block for inode\n");
       dest = extend_inode(inode);
       if (dest == NULL)
 	break;
@@ -1122,7 +1123,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     } else {
       curr_offset_address = get_byte_address(inode, inode->size - 1);
       if (curr_offset_address == NULL) {
-	printk(KERN_ERR "Unexpected error in rd_write\n");
+	printk(KERN_ERR "Unexpected error getting byte address of byte %d in rd_write\n", inode->size - 1);
 	break;
       }
       dest = curr_offset_address + 1;
@@ -1134,8 +1135,11 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     data_left_to_write -= num_copied;
     from += num_copied;
     fo.file_position += num_copied;
-    if ((inode->size - 1) < fo.file_position) // We wrote past original EOF
-      inode->size += fo.file_position - (inode ->size - 1);
+    if ((inode->size - 1) < fo.file_position) { // We wrote past original EOF
+      printk("Current inode size: %d\n", inode->size);
+      inode->size += fo.file_position - inode ->size;
+      printk("New inode size: %d\n", inode->size);
+    }
     if (num_not_copied > 0) break;
   }
   set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
