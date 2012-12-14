@@ -882,27 +882,36 @@ static int rd_mkdir(const char *usr_str)
     kfree(pathname);
     return -EFBIG;
   }
+  /* Link to new index node in parent */
   *new_inode_ptr = new_index_node;
   directory_entry_t *entry;
-  if (parent->size % BLK_SZ == 0) {
+  if (parent->size % BLK_SZ == 0) { 
+    /* Need new directory entry block */
     entry = get_free_data_block();
-    if (parent->size < DIRECT * BLK_SZ){
+    if (parent->size < DIRECT * BLK_SZ) {
+      /* Can link to new block from one of the DIRECT pointers */
       parent->direct[parent->size / BLK_SZ] = entry;
     } else if (parent->size < BLK_SZ * (DIRECT + PTRS_PB)) {
+      /* Can link to new block from one of the INDIRECT pointers */
       if (parent->size == DIRECT * BLK_SZ) {
+	/* Need to make the INDIRECT block */
 	indirect_block_t *indirect_block = get_free_data_block();
 	if (indirect_block == NULL) {
 	  kfree(pathname);
 	  return -EFBIG;
-	}
+	} 
 	parent->single_indirect = indirect_block;
 	indirect_block->data[0] = (void *) entry;
       } else {
+	/* Indirect block already exists */
 	parent->single_indirect->
 	  data[(parent->size / BLK_SZ) - DIRECT] = (void *) entry;
       }
     } else {
+      /* Need to link to new block from an INDIRECT block, that is
+	 pointed to from the DOUBLE_INDIRECT block */
       if (parent->size == BLK_SZ * (DIRECT + PTRS_PB)) {
+	/* Need to create the DOUBLE INDIRECT block */
 	double_indirect_block_t *double_indirect_block = get_free_data_block();
 	indirect_block_t *indirect_block = get_free_data_block();
 	if (indirect_block == NULL || double_indirect_block == NULL) {
@@ -918,7 +927,7 @@ static int rd_mkdir(const char *usr_str)
 	double_indirect_block->indirect_blocks[0] = indirect_block;
 	indirect_block->data[0] = (void *) entry;
       } else if ((parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) != 0) {
-	  /* Need to insert entry in prexisting indirect block */
+	  /* Can point to the new block from  a prexisting indirect block */
 	  int indirect_block_index =
 	    (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
 	  int index_in_indirect_block =
@@ -926,6 +935,7 @@ static int rd_mkdir(const char *usr_str)
 	  parent->double_indirect->indirect_blocks[indirect_block_index]
 	    ->data[index_in_indirect_block] = (void *) entry;
       } else if ((parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) == 0) {
+	/* Need to create a new indirect block to point to the new block */
 	indirect_block_t *indirect_block = get_free_data_block();
 	if (indirect_block == NULL) {
 	  release_data_block(entry);
