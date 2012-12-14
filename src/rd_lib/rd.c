@@ -145,15 +145,16 @@ int main(int argc, char *argv[])
   int i = 0, handle = -1;
   FILE *fl;
   rd_init();
- 
+
+  rd_mkdir("/hello");
   fl = fopen("out.lis", "wt");
   //  for (i = 0; i < 16 * (8 + 64 + 64*64); i++) {
     for (i = 0; i < 1025; i++) {
-    sprintf(pathname, "/file%d", i);
+    sprintf(pathname, "/hello/file%d", i);
     fprintf(fl, "%d\n", rd_mkdir(pathname));
   }
   
-  if (((handle = rd_open("/")) < 0)){
+  if (((handle = rd_open("/hello")) < 0)){
     perror("Open\n");
     exit(1);
   }
@@ -167,18 +168,18 @@ int main(int argc, char *argv[])
   fprintf(fl, "\n\n**** UNLINKING FILES *** \n\n");
 
   for (i = 0; i < 1025; i++) {
-    sprintf(pathname, "/file%d", i);
+    sprintf(pathname, "/hello/file%d", i);
     fprintf(fl, "%d\n", rd_unlink(pathname));
   }
 
   fprintf(fl, "\n\n**** DOING IT AGAIN *** \n\n");
 
     for (i = 0; i < 1025; i++) {
-    sprintf(pathname, "/file%d", i);
+    sprintf(pathname, "/hello/file%d", i);
     fprintf(fl, "%d\n", rd_mkdir(pathname));
   }
   
-  if (((handle = rd_open("/")) < 0)){
+  if (((handle = rd_open("/hello")) < 0)){
     perror("Open\n");
     exit(1);
   }
