@@ -40,6 +40,7 @@ static index_node_t *get_free_index_node(void);
 static index_node_t *get_parent_index_node(const char *pathname); // DOESNT TRASH PATHNAME
 static index_node_t *get_index_node(const char *pathname);
 static index_node_t *get_inode(size_t no);
+static void *extend_inode(index_node_t *inode);
 static void *get_free_data_block(void);
 static void release_data_block(void *data_block_ptr);
 static directory_entry_t* get_directory_entry(index_node_t* inode, int index);
@@ -127,6 +128,8 @@ static int procfs_close(struct inode *inode, struct file *file)
     }
     delete_file_descriptor_table(current->pid);
   }
+  printk("Num data_blocks remaining: %d\n", super_block->num_free_blocks);
+  printk("Num inodes remaining: %d\n", super_block->num_free_inodes);
   module_put(THIS_MODULE);
   return 0;
 }
@@ -181,20 +184,13 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   offset_info_t offset_info;
   //printk(KERN_INFO "Called ioctl\n");
   if (cmd != RD_INIT && !rd_initialized()) {
-    //printk(KERN_ERR "Ramdisk called before being initialized\n");
+    printk(KERN_ERR "Ramdisk called before being initialized\n");
     return -1;
   }
   
-  int i;
-
   switch (cmd) {
   case RD_INIT:
     rd_init();
-    /* rd_mkdir("/hello"); */
-    /* rd_mkdir("/hello/world"); */
-    /* if (get_index_node("/hello/world")) printk("I found it\n"); */
-    /* rd_unlink("/hello/world"); */
-    /* if (get_index_node("/hello/world")) printk("I cannot found it\n"); */
    break;
   case RD_CREAT:
     return rd_creat((char *) arg);
@@ -501,17 +497,13 @@ static index_node_t *get_index_node(const char *pathname)
   int i = 0;
   bool found_prev_inode = true; // start with index_nodes
   curr = index_nodes;
-  //printk("Called get_index_node with pathname %s\n", pathname);
-  //printk("Printing entries in root index_node %p\n", curr);
   for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
     dir_entry = get_directory_entry(curr, i);
-    //printk("%s , inode # %d , address: %p , type : %d\n", dir_entry->filename, dir_entry->index_node_number, get_inode(dir_entry->index_node_number), get_inode(dir_entry->index_node_number)->type);
   }
 
   if (strlen(pathname) == 1 && pathname[0] != '/')
     return NULL;
-  if (strlen(pathname) == 1 && pathname[0] == '/') { //strlen in kernel space -includes- trailing NULL
-    //printk("Returning the root index node because I was aksed for %s\n", pathname);
+  if (strlen(pathname) == 1 && pathname[0] == '/') { 
     return index_nodes; // Points to root index node
   }
   
@@ -537,45 +529,92 @@ static index_node_t *get_index_node(const char *pathname)
     }
   } 
   kfree(pathname_copy);
-  /* if (token != NULL) */
-  /*   return NULL; */
-  //printk("Root inode: %p\n", index_nodes);
-  //printk("inode 2: %p\n", (void *)index_nodes + INODE_SZ);
-  //printk("inode 3: %p\n", (void *)index_nodes + 2 * INODE_SZ);
-  //printk("Curr : %p\n", curr);
-  //printk("Bool expression : %d\n", token == NULL && found_prev_inode);
   return (token == NULL && found_prev_inode ? curr : NULL);
-  /* int i; */
-  /* index_node_t *node = NULL; */
+}
+
+static index_node_t *get_inode(size_t index)
+{
+  return (index_node_t *)(((void*)index_nodes) + INODE_SZ * index);
+}
+
+static void *extend_inode(index_node_t *inode)
+{
+  void *extending_block;
+  if (inode->size >= MAX_FILE_SIZE - BLK_SZ + 1) {
+    /* There's no room for another block for this
+       file */
+    return NULL;
+  }
   
-  /* if (strlen(pathname) == 0) */
-  /*   return index_nodes; */
-  
-  /* char *parent_pathname = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL); */
-  /* const char *filename = strrchr(pathname, '/') + 1; */
-  /* int filename_length = strlen(filename); */
-  /* if (filename_length < MAX_FILE_NAME_LEN) { */
-  /*   strncpy(parent_pathname, pathname, strlen(pathname) - filename_length - 1); */
-  /*   index_node_t *parent_node = get_index_node(parent_pathname); */
-  /*   if (parent_node != NULL) { */
-  /*     for (i = 0; i < parent_node->size / DIR_ENTRY_SZ; ++i) { */
-  /* 	    directory_entry_t *entry = get_directory_entry(parent_node, i); */
-  /* 	    if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) { */
-  /* 		  node = get_inode(entry->index_node_number); */
-  /* 		  break; */
-  /* 		} */
-  /* 	  } */
-  /* 	} */
-  /* } */
-  /* kfree(parent_pathname); */
-  /* return node; */
+  /* Get new data block to extend inode with */
+  extending_block = get_free_data_block();
+  if (inode->size < DIRECT * BLK_SZ) {
+    /* Can link to new block from one of the DIRECT pointers */
+    inode->direct[inode->size / BLK_SZ] = extending_block;
+  } else if (inode->size < BLK_SZ * (DIRECT + PTRS_PB)) {
+    /* Can link to new block from one of the INDIRECT pointers */
+    if (inode->size == DIRECT * BLK_SZ) {
+      /* Need to make the INDIRECT block */
+      indirect_block_t *indirect_block = get_free_data_block();
+      if (indirect_block == NULL) {
+	return NULL;
+      } 
+      inode->single_indirect = indirect_block;
+      indirect_block->data[0] = (void *) extending_block;
+    } else {
+      /* Indirect block already exists */
+      inode->single_indirect->
+	data[(inode->size / BLK_SZ) - DIRECT] = (void *) extending_block;
+    }
+  } else {
+    /* Need to link to new block from an INDIRECT block, that is
+       pointed to from the DOUBLE_INDIRECT block */
+    if (inode->size == BLK_SZ * (DIRECT + PTRS_PB)) {
+      /* Need to create the DOUBLE INDIRECT block */
+      double_indirect_block_t *double_indirect_block = get_free_data_block();
+      indirect_block_t *indirect_block = get_free_data_block();
+      if (indirect_block == NULL || double_indirect_block == NULL) {
+	if (indirect_block != NULL)
+	  release_data_block(indirect_block);
+	if (double_indirect_block != NULL)
+	  release_data_block(double_indirect_block);
+	release_data_block(extending_block);
+	return NULL;
+      }
+      inode->double_indirect = double_indirect_block;
+      double_indirect_block->indirect_blocks[0] = indirect_block;
+      indirect_block->data[0] = (void *) extending_block;
+    } else if ((inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) != 0) {
+      /* Can point to the new block from  a prexisting indirect block */
+      int indirect_block_index =
+	(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
+      int index_in_indirect_block =
+	(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ);
+      inode->double_indirect->indirect_blocks[indirect_block_index]
+	->data[index_in_indirect_block] = (void *) extending_block;
+    } else if ((inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) == 0) {
+      /* Need to create a new indirect block to point to the new block */
+      indirect_block_t *indirect_block = get_free_data_block();
+      if (indirect_block == NULL) {
+	release_data_block(extending_block);
+	return NULL;
+      }
+      int indirect_block_index =
+	(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
+      int index_in_indirect_block = 0;
+      inode->double_indirect->indirect_blocks[indirect_block_index]
+	->data[index_in_indirect_block] = (void *) extending_block;
+    } else {
+      printk(KERN_ERR "Encountered unexpected case in extend_inode\n");
+      return NULL;
+    }
+  }
+  return extending_block;
 }
 
 static directory_entry_t* get_directory_entry(index_node_t* inode, int index)
 {
   if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index) {
-    //printk("Inode %p\n", inode);
-    //printk("Size  %d Type: %d\n", inode->size, inode->type);
     return NULL;
   }
   return (directory_entry_t *)get_byte_address(inode, index * sizeof(directory_entry_t));
@@ -589,7 +628,6 @@ static void *get_free_data_block()
 {
   unsigned long block_num = 0;
   void *block_address = NULL;
-  //printk("Calling get_free_data_block, data_blocks : %p\n", data_blocks);
   spin_lock(&super_block_spinlock);
   if (super_block->num_free_blocks == 0) {
     spin_unlock(&super_block_spinlock);
@@ -605,12 +643,10 @@ static void *get_free_data_block()
     spin_unlock(&block_bitmap_spinlock);
     return NULL;
   }
-  //printk("Got zero bit at block num %d\n", block_num);
   set_bit(block_num, block_bitmap);
   spin_unlock(&block_bitmap_spinlock);
   block_address = data_blocks + block_num * BLK_SZ;
   memset(block_address, 0, BLK_SZ);
-  //printk("Get free data block returning with %p\n", block_address);
   return block_address;
 }
 
@@ -700,9 +736,8 @@ int rd_init()
 }
 
 /*
- * Returns the address of the offset'th
- * byte of the data associated with inode (along with the start and end addresses
- * of the containing data block), or NULL on error
+ * Returns the address of the offset'th byte (0 indexed)
+ * of the data associated with inode or NULL on error
  */
 static void *get_byte_address(index_node_t *inode, int offset)
 {
@@ -771,66 +806,14 @@ static int rd_creat(const char *usr_str)
     kfree(pathname);
     return -EFBIG;
   }
+  /* Link to new index node in parent */
   *new_inode_ptr = new_index_node;
-  directory_entry_t *entry;
+  directory_entry_t *entry = NULL;
   if (parent->size % BLK_SZ == 0) {
-    entry = get_free_data_block();
-    if (parent->size < DIRECT * BLK_SZ){
-      parent->direct[parent->size / BLK_SZ] = entry;
-    } else if (parent->size < BLK_SZ * (DIRECT + PTRS_PB)) {
-      if (parent->size == DIRECT * BLK_SZ) {
-	indirect_block_t *indirect_block = get_free_data_block();
-	if (indirect_block == NULL) {
-	  kfree(pathname);
-	  return -EFBIG;
-	}
-	parent->single_indirect = indirect_block;
-	indirect_block->data[0] = (void *) entry;
-      } else {
-	parent->single_indirect->
-	  data[(parent->size / BLK_SZ) - DIRECT] = (void *) entry;
-      }
-    } else {
-      if (parent->size == BLK_SZ * (DIRECT + PTRS_PB)) {
-	double_indirect_block_t *double_indirect_block = get_free_data_block();
-	indirect_block_t *indirect_block = get_free_data_block();
-	if (indirect_block == NULL || double_indirect_block == NULL) {
-	  if (indirect_block != NULL)
-	    release_data_block(indirect_block);
-	  if (double_indirect_block != NULL)
-	    release_data_block(double_indirect_block);
-	  kfree(pathname);
-	  release_data_block(entry);
-	  return -EFBIG;
-	}
-	parent->double_indirect = double_indirect_block;
-	double_indirect_block->indirect_blocks[0] = indirect_block;
-	indirect_block->data[0] = (void *) entry;
-      } else if ((parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) != 0) {
-	  /* Need to insert entry in prexisting indirect block */
-	  int indirect_block_index =
-	    (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
-	  int index_in_indirect_block =
-	    (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ);
-	  parent->double_indirect->indirect_blocks[indirect_block_index]
-	    ->data[index_in_indirect_block] = (void *) entry;
-      } else if ((parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) == 0) {
-	indirect_block_t *indirect_block = get_free_data_block();
-	if (indirect_block == NULL) {
-	  release_data_block(entry);
-	  kfree(pathname);
-	  return -EFBIG;
-	}
-	int indirect_block_index =
-	  (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
-	int index_in_indirect_block = 0;
-	parent->double_indirect->indirect_blocks[indirect_block_index]
-	  ->data[index_in_indirect_block] = (void *) entry;
-      } else {
-	//printk(KERN_ERR "Unexpected case in mkdir\n");
-	kfree(pathname);
-	return -EFBIG;
-      }
+    entry = (directory_entry_t *) extend_inode(parent);
+    if (entry == NULL) {
+      kfree(pathname);
+      return -EFBIG;
     }
   } else {
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
@@ -884,74 +867,12 @@ static int rd_mkdir(const char *usr_str)
   }
   /* Link to new index node in parent */
   *new_inode_ptr = new_index_node;
-  directory_entry_t *entry;
-  if (parent->size % BLK_SZ == 0) { 
-    /* Need new directory entry block */
-    entry = get_free_data_block();
-    if (parent->size < DIRECT * BLK_SZ) {
-      /* Can link to new block from one of the DIRECT pointers */
-      parent->direct[parent->size / BLK_SZ] = entry;
-    } else if (parent->size < BLK_SZ * (DIRECT + PTRS_PB)) {
-      /* Can link to new block from one of the INDIRECT pointers */
-      if (parent->size == DIRECT * BLK_SZ) {
-	/* Need to make the INDIRECT block */
-	indirect_block_t *indirect_block = get_free_data_block();
-	if (indirect_block == NULL) {
-	  kfree(pathname);
-	  return -EFBIG;
-	} 
-	parent->single_indirect = indirect_block;
-	indirect_block->data[0] = (void *) entry;
-      } else {
-	/* Indirect block already exists */
-	parent->single_indirect->
-	  data[(parent->size / BLK_SZ) - DIRECT] = (void *) entry;
-      }
-    } else {
-      /* Need to link to new block from an INDIRECT block, that is
-	 pointed to from the DOUBLE_INDIRECT block */
-      if (parent->size == BLK_SZ * (DIRECT + PTRS_PB)) {
-	/* Need to create the DOUBLE INDIRECT block */
-	double_indirect_block_t *double_indirect_block = get_free_data_block();
-	indirect_block_t *indirect_block = get_free_data_block();
-	if (indirect_block == NULL || double_indirect_block == NULL) {
-	  if (indirect_block != NULL)
-	    release_data_block(indirect_block);
-	  if (double_indirect_block != NULL)
-	    release_data_block(double_indirect_block);
-	  kfree(pathname);
-	  release_data_block(entry);
-	  return -EFBIG;
-	}
-	parent->double_indirect = double_indirect_block;
-	double_indirect_block->indirect_blocks[0] = indirect_block;
-	indirect_block->data[0] = (void *) entry;
-      } else if ((parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) != 0) {
-	  /* Can point to the new block from  a prexisting indirect block */
-	  int indirect_block_index =
-	    (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
-	  int index_in_indirect_block =
-	    (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ);
-	  parent->double_indirect->indirect_blocks[indirect_block_index]
-	    ->data[index_in_indirect_block] = (void *) entry;
-      } else if ((parent->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ) == 0) {
-	/* Need to create a new indirect block to point to the new block */
-	indirect_block_t *indirect_block = get_free_data_block();
-	if (indirect_block == NULL) {
-	  release_data_block(entry);
-	  kfree(pathname);
-	  return -EFBIG;
-	}
-	int indirect_block_index =
-	  (parent->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
-	int index_in_indirect_block = 0;
-	parent->double_indirect->indirect_blocks[indirect_block_index]
-	  ->data[index_in_indirect_block] = (void *) entry;
-      } else {
-	//printk(KERN_ERR "Unexpected case in mkdir\n");
-	kfree(pathname);
-	return -EFBIG;
-      }
+  directory_entry_t *entry = NULL;
+  if (parent->size % BLK_SZ == 0) {
+    entry = (directory_entry_t *) extend_inode(parent);
+    if (entry == NULL) {
+      kfree(pathname);
+      return -EFBIG;
     }
   } else {
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
@@ -963,14 +884,9 @@ static int rd_mkdir(const char *usr_str)
   return 0;
 }
 
-static index_node_t *get_inode(size_t index)
-{
-  return (index_node_t *)(((void*)index_nodes) + INODE_SZ * index);
-}
-
 static int rd_unlink(const char *usr_str)
 {	
-  int i;
+  int i, indirect_block_num = 0, dir_block_num = 0;
   char *pathname = NULL;
   size_t usr_strlen = strlen_user(usr_str);
   index_node_t *node = NULL;
@@ -1005,6 +921,19 @@ static int rd_unlink(const char *usr_str)
 	    release_data_block(block_to_release);
 	    num_blocks--;
 	  }
+	  printk("About to release all data blocks for file");
+	  if (node->double_indirect != NULL) {
+	    /* Need to release the double indirect block,
+	       and the single indirect blocks pointed to from it */
+	    for (indirect_block_num = 0; indirect_block_num < PTRS_PB; indirect_block_num++) {
+	      if (node->double_indirect->indirect_blocks[indirect_block_num] != NULL)
+		release_data_block(node->double_indirect->indirect_blocks[indirect_block_num]);
+	    }
+	    release_data_block(node->double_indirect);
+	    node->double_indirect = NULL;
+	  }
+	  if (node->single_indirect != NULL)
+	    release_data_block(node->single_indirect);
 	}
 				
 	// Init node
@@ -1026,9 +955,44 @@ static int rd_unlink(const char *usr_str)
 	  release_data_block(last_entry);
 	  // Remove last location(DIRECT)
 	  if (parent_node->size / BLK_SZ < DIRECT) {
-	    parent_node->direct[parent_node->size / BLK_SZ] = 0;
-	  } else { // IF more than 8
+	    parent_node->direct[parent_node->size / BLK_SZ] = NULL;
+	  } else if (parent_node->size / BLK_SZ < DIRECT + PTRS_PB) { // IF more than 8
 	    // TODO
+	    if (parent_node->size / BLK_SZ == DIRECT) {
+	      /* Need to also release the indirect block */
+	      release_data_block(parent_node->single_indirect);
+	      parent_node->single_indirect = NULL;
+	    } else {
+	      /* Need to NULL out the entry in SINGLE_INDIRECT block
+		 that pointed to the directory entry block we just
+		 released */
+	      for (dir_block_num = 0; dir_block_num < PTRS_PB; dir_block_num++) {
+		if (parent_node->single_indirect->data[dir_block_num] == last_entry)
+		  parent_node->single_indirect->data[dir_block_num] = NULL;
+	      }
+	    }
+	  } else if (parent_node->size / BLK_SZ < DIRECT + PTRS_PB * (1 + PTRS_PB)) {
+	    if (parent_node->size / BLK_SZ == DIRECT + PTRS_PB) {
+	      /* Need to release the single indirect block that
+		 pointed to the entry we just released, as well
+		 as the double indirect block.
+
+		 ASSUMES DIRECTORY ENTRIES ARE NEVER FRAGMENTED - 
+		 THEY ARE ALWAYS IN A CONTIGUOUS BLOCK
+	      */
+	      release_data_block(parent_node->double_indirect[0]);
+	      release_data_block(parent_node->double_indirect);
+	      parent_node->double_indirect = NULL;
+	    } else if ((parent_node->size / BLK_SZ) % (PTRS_PB * BLK_SZ) != 0) {
+	      /* Need to NULL out the entry in SINGLE_INDIRECT block
+		 that pointed to the directory entry block we just
+		 released */
+	      int indirect_block_index =
+		(inode->size - BLK_SZ*(DIRECT + PTRS_PB)) / (PTRS_PB * BLK_SZ);
+	      int index_in_indirect_block =
+		((inode->size - BLK_SZ*(DIRECT + PTRS_PB)) % (PTRS_PB * BLK_SZ))/ BLK_SZ;
+	      /*UNFINISHED */
+	    }
 	  }
 	}
 	break;
@@ -1110,14 +1074,7 @@ static int rd_readdir(const pid_t pid, const rd_readdir_arg_t *usr_arg)
   /* Check if we're at EOF */
   if (fo.index_node->size == 0 || fo.index_node->size == fo.file_position)
     return 0;
-  //printk("Fo has index node : %p\n", fo.index_node);
-  //printk("inode->direct[0]: %p\n", fo.index_node->direct[0]);
-  //printk("Filename at that address : %s\n", ((directory_entry_t *) fo.index_node->direct[0])->filename);
-  //printk("Fileposition in inode address: %d\n", fo.file_position);
   entry = get_directory_entry(fo.index_node, fo.file_position / DIR_ENTRY_SZ);
-  //printk("Reading entry %p\n", entry);
-  //printk("Filename : %s\n", entry->filename);
-  /* usr_arg->address = entry->filename; */
   status = copy_to_user(read_arg->address, entry->filename, MAX_FILE_NAME_LEN);
   fo.file_position += DIR_ENTRY_SZ;
   set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
