@@ -4,12 +4,13 @@
   or fork'd children. In order to go in this direction, could leverage pthread_t tgid (thread group id), and check for parents
   of processes when looking for file descriptor table. Approach of destroying file descriptor tables on close file operation
   gets messy when considering multipled threads/ child processes. Process and its children all belong to same process group (getpgrp()).
-- Current approach to removing directory entries is prone to fragmentation: leaves blank directory entries in between used ones
--We were beaten to the name "struct super_block" by the linux kernel developers; it's already defined in linux/fs.h
 
 Synchronization Primitives:
+	- Could extend to have safe multiple readers of -the same file- (by adding an "open count" variable, and leveraging the rwlock_t
+	already available in each index node) , but would need to be careful not to hold locks while copying
+	from/to user space
 	- spinlocks protect rd_init(), the super_block, and block bitmap, since these locks will be held for only sort period of time
-	- currently have rw_lock_t protecting the index_nodes and data_blocks arrays, could make locking finer grained for better write performance
+
 
 TODO:
 - checkout what the deal with write_trylock on file_lock is in get_free_index_node
@@ -17,15 +18,3 @@ TODO:
 -Making the ramdisk threadsafe:
 	- add fdt-level locks: need to be held for create/remove fd table/entry, add entry, set entry
 	- add locks to each inode, remove data_blocks lock
--add helper functions
-     // In the following, a file descriptor is an unsigned short
-     file_descriptor create_entry(fdt, index_node_t *inode) // returns index into file descriptor table
-     file_object_t   get_entry(fdt, file_descriptor)
-     int 	     remove_entry(fdt, file_descriptor) //returns number of entries remaining in file descriptor table (after removal)
-     int	     set_entry(fdt, file_descriptor, file_object_t);
-  char tokenize_char_arr[] = {"/drew/documents/file"};
-  char *to_print = NULL, tokenize = tokenize_char_arr;
-  printk(KERN_INFO "About to tokenize \"/drew/documents/file\"\n");
-  while ((to_print = strsep(&tokenize, "/")) != NULL) {
-      printk("%s\n", to_print);
-    }
