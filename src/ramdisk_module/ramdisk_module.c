@@ -201,11 +201,12 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
     break;
   case RD_OPEN:
     return rd_open(current->pid, (char *) arg);
+  case RD_CLOSE:
+    return rd_close(current->pid, (int) arg);
   case RD_MKDIR:
-    rd_mkdir((char *) arg);
-    break;
+    return rd_mkdir((char *) arg);
   case RD_UNLINK:
-    rd_unlink((char *) arg);
+    return rd_unlink((char *) arg);
   case RD_READDIR:
     return rd_readdir(current->pid, (rd_readdir_arg_t *) arg);
   case DBG_PRINT_FDT_PIDS:
@@ -394,13 +395,14 @@ static int set_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 {
   /* TODO: write_lock(fdt_rwlock) */
   /* Check that the given file object has a valid index node pointer */
-  if ((unsigned long) fo.index_node < (unsigned long) index_nodes
-      || (unsigned long) fo.index_node >= (unsigned long) block_bitmap
-      || (((unsigned long) fo.index_node - (unsigned long)index_nodes) % INODE_SZ != 0)
-      || fd > fdt->entries_length) {
-    /* TODO: write_unlock(fdt_rwlock) */
-    return -EINVAL;
-  } else if (fdt->entries[fd].index_node == NULL) {
+  /* if ((unsigned long) fo.index_node < (unsigned long) index_nodes */
+  /*     || (unsigned long) fo.index_node >= (unsigned long) block_bitmap */
+  /*     || (((unsigned long) fo.index_node - (unsigned long)index_nodes) % INODE_SZ != 0) */
+  /*     || fd > fdt->entries_length) { */
+  /*   /\* TODO: write_unlock(fdt_rwlock) *\/ */
+  /*   return -EINVAL; */
+  /*} else*/
+  if (fdt->entries[fd].index_node == NULL) {
     return -EINVAL;
   }
   fdt->entries[fd] = fo;
@@ -781,7 +783,7 @@ static int rd_mkdir(const char *usr_str)
   if (usr_str_len <= 2 || !access_ok(VERIFY_READ, usr_str, MAX_FILE_NAME_LEN))
     return -EINVAL;
   pathname = kcalloc(usr_str_len, sizeof(char), GFP_KERNEL);
-  if (pathname == NULL)
+  if (pathname == NULL) 
     return -1;
   strncpy_from_user(pathname, usr_str, usr_str_len);
 
@@ -793,17 +795,17 @@ static int rd_mkdir(const char *usr_str)
   index_node_t *parent = get_parent_index_node(pathname);
   if (parent == NULL)
     return -EINVAL;
+
   if (parent->size >= MAX_FILE_SIZE)
     return -EFBIG;
   /* TODO: get filelock on parent */
   index_node_t *new_inode_ptr = get_free_index_node();
-  if (new_inode_ptr == NULL)
-	return -EINVAL;
+  if (new_inode_ptr == NULL) {
+    return -EFBIG;
+  }
   *new_inode_ptr = new_index_node;
-  //printk("New inode %p for %s has type %d\n", new_inode_ptr, pathname, new_inode_ptr->type);
   directory_entry_t *entry;
   if (parent->size % BLK_SZ == 0) {
-    //printk("mkdir about to ask for new data_block for %s\n", pathname);
     entry = get_free_data_block();
     if (parent->size < DIRECT * BLK_SZ){
       parent->direct[parent->size / BLK_SZ] = entry;
@@ -962,6 +964,7 @@ static int rd_open(const pid_t pid, const char *usr_str)
   pathname = kcalloc(usr_strlen, sizeof(char), GFP_KERNEL);
   strncpy_from_user(pathname, usr_str, usr_strlen);
   //printk("Opening %s\n", pathname);
+
   /* Remove trailing forward slash, if it exists */
   if (usr_strlen > 2 && pathname[usr_strlen-1] == '/')
     pathname[usr_strlen-1] = '\0';
