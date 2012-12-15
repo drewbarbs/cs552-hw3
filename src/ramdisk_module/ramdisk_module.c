@@ -911,6 +911,7 @@ static int rd_mkdir(const char *usr_str)
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
   }
   if (entry == NULL) {
+    write_unlock(&new_inode_ptr->file_lock);
     write_unlock(&parent->file_lock);
     kfree(pathname);
     return -EFBIG;
@@ -919,6 +920,7 @@ static int rd_mkdir(const char *usr_str)
   entry->index_node_number = ((void *) new_inode_ptr - (void *)index_nodes) / INODE_SZ;
   strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
   parent->size += DIR_ENTRY_SZ;
+  write_unlock(&new_inode_ptr->file_lock);
   write_unlock(&parent->file_lock);
   kfree(pathname);
   return 0;
