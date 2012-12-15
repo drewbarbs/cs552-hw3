@@ -1240,7 +1240,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     space_available_at_dest = 0,
     num_copied = 0,
     num_not_copied = 0;
-  void *curr_offset_address = NULL, *dest = NULL, *from = NULL;
+  void *curr_offset_address = NULL, *dest = NULL, *src = NULL, *data_buf = NULL;
   index_node_t *inode = NULL;
   /* Make sure the process has a file descriptor table */
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
@@ -1256,25 +1256,45 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     kfree(write_arg);
     return -EINVAL;
   }
+    
   amt_requested = write_arg->num_bytes;
   data_left_to_write  = amt_requested;
-  from = write_arg->address;
+
   file_object_t fo = get_file_descriptor_table_entry(fdt, write_arg->fd);
   if (fo.index_node == NULL) {  
     kfree(write_arg);
     return -EINVAL;
   }
   
+  data_buf = kcalloc(amt_requested, 1, GFP_KERNEL);
+  if (data_buf == NULL) {
+    printk(KERN_ERR "Couldn't calloc buffer for write\n");
+    kfree(write_arg);
+    return -EFBIG;
+  }
+  
+  num_not_copied = copy_from_user(data_buf, write_arg->address, amt_requested);
+  if (num_not_copied > 0) {
+    printk(KERN_ERR "Couldnt buffer the %d bytes requested to be written\n", amt_requested);
+    kfree(write_arg);
+    kfree(data_buf);
+    return -EINVAL;
+  }
+
+  src = data_buf;
+  
   inode = fo.index_node;
 
   if (!write_trylock(&inode->file_lock)) {
     kfree(write_arg);
+    kfree(data_buf);
     return -EINVAL;
   }
 
   if (inode->type != REG) {
     write_unlock(&inode->file_lock);
     kfree(write_arg);
+    kfree(data_buf);
     return -EINVAL;
   }
 
@@ -1302,10 +1322,11 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
       space_available_at_dest = (unsigned long) BLOCK_END(dest) - (unsigned long) dest;
     }
     amt_to_copy = min(data_left_to_write, space_available_at_dest);
-    num_not_copied = copy_from_user(dest, from, amt_to_copy);
-    num_copied = amt_to_copy - num_not_copied;
+    //    num_not_copied = copy_from_user(dest, from, amt_to_copy);
+    memcpy(dest, src, amt_to_copy);
+    num_copied = amt_to_copy;// - num_not_copied;
     data_left_to_write -= num_copied;
-    from += num_copied;
+    src += num_copied;
     fo.file_position += num_copied;
     if ((inode->size - 1) < fo.file_position) { // We wrote past original EOF
       printk("Current inode size: %d\n", inode->size);
@@ -1314,8 +1335,9 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     }
     if (num_not_copied > 0) break;
   }
-  set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
   write_unlock(&inode->file_lock);
+  set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
+  kfree(data_buf);
   kfree(write_arg);
   return amt_requested - data_left_to_write;
   
