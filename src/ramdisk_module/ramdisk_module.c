@@ -1240,7 +1240,7 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   copy_to_user(read_arg->address, data_buf, amt_requested - data_left_to_read);
   kfree(read_arg);
   kfree(data_buf);
-  return amt_requested - data_left_to_read;
+  return amt_fulfillable - data_left_to_read;
 }
 
 static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
@@ -1381,13 +1381,14 @@ static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg)
   }
   read_lock(&fo.index_node->file_lock);
   if(fo.index_node->type != REG ||
-      seek_arg->offset > fo.index_node->size) {
+      seek_arg->offset > fo.index_node->size
+     || seek_arg->offset >= MAX_FILE_SIZE) {
     read_unlock(&fo.index_node->file_lock);
     return -EINVAL;
   }
+  read_unlock(&fo.index_node->file_lock);
   fo.file_position = seek_arg->offset;
   set_file_descriptor_table_entry(fdt, seek_arg->fd, fo);
-  read_unlock(&fo.index_node->file_lock);
   kfree(seek_arg);
   return 0;
 }
