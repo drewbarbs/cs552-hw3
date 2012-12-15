@@ -932,15 +932,17 @@ static int rd_unlink(const char *usr_str)
   char *pathname = NULL;
   size_t usr_strlen = strlen_user(usr_str);
   index_node_t *node = NULL;
+  printk("Starting unlink\n");
   if (usr_strlen <= 2)
     return -EINVAL;
   pathname = kcalloc(usr_strlen, sizeof(char), GFP_KERNEL);
+  if (pathname == NULL)
+    return -1;
   strncpy_from_user(pathname, usr_str, usr_strlen);
   /* Remove trailing forward slash, if it exists */
   if (pathname[usr_strlen-1] == '/')
     pathname[usr_strlen-1] = '\0';
 
-  printk("Starting unlink\n");
   index_node_t *parent_node = get_readlocked_parent_index_node(pathname);
   if (parent_node == NULL) {
     kfree(pathname);
