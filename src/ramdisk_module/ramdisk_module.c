@@ -1151,9 +1151,11 @@ static int rd_close(const pid_t pid, const int fd)
     return -EINVAL;
   }
   file_object_t fo = get_file_descriptor_table_entry(fdt, fd);
-  if (fo.index_node != NULL) {
-    atomic_dec(&fo.index_node->open_count);
+  if (fo.index_node == NULL) {
+    return -EINVAL;
   }
+
+  atomic_dec(&fo.index_node->open_count);
   return delete_file_descriptor_table_entry(fdt, fd);
 }
 
@@ -1200,6 +1202,8 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 
   if (fo.index_node->type != REG) {
     read_unlock(&fo.index_node->file_lock);
+    kfree(read_arg);
+    return -EINVAL;
   }
 
   inode = fo.index_node;
