@@ -1,3 +1,6 @@
+/* 
+   Our test cases
+*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -5,23 +8,41 @@
 #include <unistd.h>
 #include "rd.h"
 
+// #define's to control what tests are performed,
+// comment out a test if you do not wish to perform it
+
 #define RAND_WRITE_AND_SEEK
-#define UNLINK
 #define EXCESSIVE_WRITE_REQUEST
 #define WRITE_TO_DIR
+#define TEST6 //mkdir
+#define TEST7 //open
+#define TEST8 //close
+#define TEST9 //readdir
+
+// #define's to control whether single indirect or
+// double indirect block pointers are tested
+
+#define TEST_SINGLE_INDIRECT
+#define TEST_DOUBLE_INDIRECT
+
 
 #define MAX_FILES 1023
-#define BLK_SZ 256		
-#define DIRECT 8		
-#define PTR_SZ 4
+#define BLK_SZ 256		/* Block size */
+#define DIRECT 8		/* Direct pointers in location attribute */
+#define PTR_SZ 4		/* 32-bit [relative] addressing */
 #define DIR_ENTRY_SZ 16
-#define PTRS_PB  (BLK_SZ / PTR_SZ)
+#define PTRS_PB  (BLK_SZ / PTR_SZ) /* Pointers per index block */
 #define MAX_FILE_SIZE (BLK_SZ * (DIRECT + PTRS_PB + PTRS_PB*PTRS_PB))
 #define NUM_DATA_BLOCKS 7931
 
 static char pathname[80];
+
+static char data1[DIRECT*BLK_SZ]; /* Largest data directly accessible */
+static char data2[PTRS_PB*BLK_SZ];     /* Single indirect data size */
+static char data3[PTRS_PB*PTRS_PB*BLK_SZ]; /* Double indirect data size */
+static char addr[PTRS_PB*PTRS_PB*BLK_SZ+1]; /* Scratchpad memory */
+static char pathname[80];
 static char sequential_data[MAX_FILE_SIZE * 2];
-static char addr[PTRS_PB*PTRS_PB*BLK_SZ+1];
 static char read_buf[MAX_FILE_SIZE];
 
 int make_seqfile()
@@ -68,11 +89,15 @@ int make_seqfile()
   
 }
 
-
-int main()
-{
-  int retval, fd, i, offset, index_node_number, num_written;
+int main () {
+  int retval, fd, i, offset, index_node_number, num_written;  
   char comp;
+  
+  
+  /* Some arbitrary data for our files */
+  memset (data1, '1', sizeof (data1));
+  memset (data2, '2', sizeof (data2));
+  memset (data3, '3', sizeof (data3));
 
   /* Prepare data */
   memset (pathname, 0, 80);
@@ -150,102 +175,121 @@ int main()
   
  #endif  
 
-#ifdef UNLINK
-  /* Tests that rd_unlink does not create fragmentation of directory entries.
-     
-     Assumes root directory is empty to begin with. Generates MAX_FILES (1023),
-     which utilizes DIRECT + 1 (indirect block) + 56 data blocks
-     a subset of them of size large enough to free a data_block,
-     so that remaining datablocks should be
-     NUM_DATA_BLOCKS - (DIRECT + 1 + 56 - 1)
-     and then tries to generate a file large enough to fill the remaining data
-     blocks 
-  */
-
-  memset (pathname, 0, 80);
-  /* Generate MAXIMUM regular files */
-  for (i = 0; i < MAX_FILES + 1; i++) { // go beyond the limit
-    sprintf (pathname, "/file%d", i);
+#ifdef TEST6 //(mkdir)
+  //if filename is longer than 14bytes
+  retval = rd_mkdir("/123456789012345");
+  
+  if (retval >= 0)
+  {
+	  fprintf (stderr, "rd_mkdir: Filename longer than 14 bytes is created\n");
+	  exit(1);
+  }
+  
+//if creating DIR nder REG file
+  rd_creat("/test.txt");
+  retval = rd_mkdir("/test.txt/dir");
+  
+  if (retval >= 0)
+  {
+	  fprintf (stderr, "rd_mkdir: Directory created under regular file\n");
+	  exit(1);
+  }
     
-    retval = rd_creat (pathname);
+//if parent DIR doesn't exist
+  retval = rd_mkdir("/nonexistdir/dir");
+  
+  if (retval >= 0)
+  {
+	  fprintf (stderr, "rd_mkdir: Directory created under non-existing parent\n");
+	  exit(1);
+  }
+  
+//if creating maximum number of directories
+  /* Generate MAXIMUM directory files */
+  for (i = 0; i < MAX_FILES + 1; i++) { // go beyond the limit
+    sprintf (pathname, "/dir%d", i);
+    retval = rd_mkdir(pathname);
+    if (retval < 0) {
+      fprintf (stderr, "rd_mkdir: File creation error! status: %d\n", retval);
+      if (i != MAX_FILES)
+        break;
+    }
+    memset (pathname, 0, 80);
+  }  
+  
+  /* Delete some of the directories created */
+  for (i = 0; i < 100; i++) { 
+    sprintf (pathname, "/dir%d", i);
+    retval = rd_unlink (pathname);
     
     if (retval < 0) {
-      fprintf (stderr, "rd_create: File creation error! status: %d\n", 
+      fprintf (stderr, "rd_unlink: File deletion error! status: %d\n", 
 	       retval);
       
-      if (i != MAX_FILES)
-	exit (1);
+      exit (1);
     }
     
     memset (pathname, 0, 80);
-  }   
-
-  /* Unlink enough  files to free a datablock + 1*/
-  for (i = 0; i < 15 + 2; i++) {
-    //    offset = rand() % MAX_FILES;
-    memset (pathname, 0, 80);
-    sprintf (pathname, "/file%d", i);
-    retval = rd_unlink(pathname);
-    if (retval < 0) {
-      fprintf(stderr, "rd_unlink: Error unlinking file%d: status %d\n", offset, retval);
-      exit(1);
-    }
   }
+#endif
 
-  retval = rd_creat("/bigfile1");
-  if (retval < 0) {
-    fprintf (stderr, "rd_create: Error creating /bigfile! status: %d\n",
-  	     retval);
-    exit(1);
+#ifdef TEST7 //(open)
+//if filename doesn't exist
+  retval =  rd_open ("/nonexist"); /* Open directory file to read its entries */
+  
+  if (retval >= 0)
+  {
+	fprintf (stderr, "rd_open: non-existing directory opened\n");
+	exit(1);
   }
   
-  fd = rd_open("/bigfile1");
-  retval = rd_write(fd, sequential_data, MAX_FILE_SIZE);
-  if (retval != MAX_FILE_SIZE) {
-    fprintf (stderr, "rd_write: Reportedly wrote unexpected amount of data /bigfile1! status: %d\n",
-  	     retval);
-    exit(1);
+  retval =  rd_open ("/nonexist.txt"); /* Open regular file */
+  if (retval >= 0)
+  {
+	fprintf (stderr, "rd_open: non-existing file opened\n");
+	exit(1);
   }
-  num_written = retval;
-  if ((retval = rd_close(fd)) < 0) {
-    fprintf (stderr, "rd_close: Error closing /bigfile1! status: %d\n",
-  	     retval);
-    exit(1);
+#endif 
+
+#ifdef TEST8 //(close)
+  retval = rd_close(1000);
+  
+  if (retval >= 0)
+  {
+	fprintf (stderr, "non-opened file closed\n");
+	exit(1);
   }
-  /* retval = rd_creat("/bigfile2"); */
-  /* if (retval < 0) { */
-  /*   fprintf (stderr, "rd_create: Error creating /bigfile2! status: %d\n", */
-  /* 	     retval); */
-  /*   exit(1); */
-  /* } */
-  
-  /* fd = rd_open("/bigfile2"); */
-  /* retval = rd_write(fd, sequential_data, MAX_FILE_SIZE); */
-  /* if (retval < 0) { */
-  /*   fprintf (stderr, "rd_write: Error writing to  /bigfile2! status: %d\n", */
-  /* 	     retval); */
-  /*   exit(1); */
-  /* } */
-  /* num_written += retval; */
-  /* if ((retval = rd_close(fd)) < 0) { */
-  /*   fprintf (stderr, "rd_close: Error closing /bigfile2! status: %d\n", */
-  /* 	     retval); */
-  /*   exit(1); */
-  /* } */
-  /* if (num_written != BLK_SZ * (NUM_DATA_BLOCKS - (DIRECT + 1 + 55) */
-  /* 			       - (1 + 1 + PTRS_PB))) { */
-  /*   fprintf (stderr, "rd_unlink: Error utilizing remaining data blocks! Amount of data written: %d\n", */
-  /* 	     num_written); */
-  /*   exit(1); */
-  /* } */
+#endif
 
-
+#ifdef TEST9 //(readdir)
+//if reading REG file
+  rd_creat("/test.txt");
+  fd = rd_open("/test.txt");
+  memset (addr, 0, sizeof(addr)); /* Clear scratchpad memory */
+  retval = rd_readdir (fd, addr); /* 0 indicates end-of-file */
   
+  if (retval >= 0)
+  {
+	fprintf (stderr, "rd_readdir: Regular file read\n");
+	exit(1);
+  }
+
+//if dir is empty
+  rd_mkdir("/test9");
+  fd = rd_open("/test9");
+  //fprintf (stderr, "fd: %d\n", fd);
+  memset (addr, 0, sizeof(addr)); /* Clear scratchpad memory */
+  retval = rd_readdir (fd, addr); /* 0 indicates end-of-file */
+  
+  if (retval != 0)
+  {
+	fprintf (stderr, "rd_readdir: Didn't return 0 on empty directory\n");
+	exit(1);
+  }
 
 #endif
 
+  fprintf(stdout, "Passed all of our own tests\n");
 
-
-  fprintf(stdout, "Passed all of my own tests\n");
   return 0;
 }

@@ -889,6 +889,11 @@ static int rd_mkdir(const char *usr_str)
   if (pathname == NULL) 
     return -1;
   strncpy_from_user(pathname, usr_str, usr_str_len);
+  
+  if (strlen(strrchr(pathname, '/') + 1) > MAX_FILE_NAME_LEN) {
+    kfree(pathname);
+    return -EINVAL;
+  }
 
   existing_node = get_readlocked_index_node(pathname);
   if (existing_node != NULL) {
