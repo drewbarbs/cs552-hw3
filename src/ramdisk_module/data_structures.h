@@ -35,6 +35,7 @@ typedef struct double_indirect_block_t {
 typedef struct index_node {
   file_type_t type;
   int size;
+  atomic_t open_count; // Used to allow readers to increment open_count
   rwlock_t file_lock; // sizeof(rwlock_t) == 4
   void *direct[DIRECT];
   indirect_block_t *single_indirect;

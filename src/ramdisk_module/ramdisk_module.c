@@ -9,6 +9,7 @@
 #include <linux/init.h>
 #include <linux/vmalloc.h>
 #include <linux/spinlock.h>
+#include <asm/atomic.h>
 #include <linux/errno.h> /* error codes */
 #include <asm/uaccess.h> /* gives us get/put_user functions */
 #include "ramdisk_module.h"
@@ -37,8 +38,8 @@ static int delete_file_descriptor_table_entry(file_descriptor_table_t *fdt,
 static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 					     unsigned short fd);
 static index_node_t *get_free_index_node(void);
-static index_node_t *get_parent_index_node(const char *pathname); // DOESNT TRASH PATHNAME
-static index_node_t *get_index_node(const char *pathname);
+static index_node_t *get_readlocked_parent_index_node(const char *pathname); // DOESNT TRASH PATHNAME
+static index_node_t *get_readlocked_index_node(const char *pathname);
 static index_node_t *get_inode(size_t no);
 static void *extend_inode(index_node_t *inode);
 static void *get_free_data_block(void);
@@ -436,7 +437,7 @@ static size_t get_file_descriptor_table_size(file_descriptor_table_t *fdt,
 */
 static index_node_t *get_free_index_node()
 {
-  int i = 0;
+  int i = 0, direct_ptr_index = 0;
   index_node_t *new_inode = NULL, *p = NULL;
   /* Make sure there is a free inode/ decrement inodes counter in
    * superblock
@@ -456,6 +457,12 @@ static index_node_t *get_free_index_node()
       if (p->type == UNALLOCATED) {
 	new_inode = p;
 	new_inode->type = ALLOCATED;
+	new_inode->size = 0;
+	atomic_set(&new_inode->open_count, 0);
+	for (direct_ptr_index = 0; direct_ptr_index < DIRECT; direct_ptr_index++)
+	  new_inode->direct[direct_ptr_index] = NULL;
+	new_inode->single_indirect = NULL;
+	new_inode->double_indirect = NULL;
 	write_unlock(&new_inode->file_lock);
 	break;
       } else {
@@ -467,7 +474,7 @@ static index_node_t *get_free_index_node()
   if (new_inode == NULL) {
     //printk(KERN_ERR "get_free_index_node failed to find free inode,"
     //	   " despite having first checked the super block counter: %d\n", super_block->num_free_inodes);
-  }
+  } 
   return new_inode;
 }
 
@@ -477,7 +484,7 @@ static index_node_t *get_free_index_node()
  *
  * IMPORTANT: pathname should be a string in kernel space
  */
-static index_node_t *get_parent_index_node(const char *pathname)
+static index_node_t *get_readlocked_parent_index_node(const char *pathname)
 {
   char *pathname_copy = NULL, *filename = NULL;
   index_node_t *parent;
@@ -489,27 +496,24 @@ static index_node_t *get_parent_index_node(const char *pathname)
   }
   pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
   strncpy(pathname_copy, pathname, strlen(pathname) - strlen(filename));
-  parent = get_index_node(pathname_copy);
-  kfree(pathname_copy);
+  parent = get_readlocked_index_node(pathname_copy);
+  kfree(pathname_copy); //kfree does not sleep
   return parent;
 }
 
-static index_node_t *get_index_node(const char *pathname)
+static index_node_t *get_readlocked_index_node(const char *pathname)
 {
 
   char *pathname_copy, *token, *tokenize;
-  index_node_t *curr = index_nodes;
+  index_node_t *curr = index_nodes, *prev = NULL;
   directory_entry_t *dir_entry = NULL;
   int i = 0;
   bool found_prev_inode = true; // start with index_nodes
-  curr = index_nodes;
-  for (i = 0; i < curr->size / sizeof(directory_entry_t); i++) {
-    dir_entry = get_directory_entry(curr, i);
-  }
 
-  if (strlen(pathname) == 1 && pathname[0] != '/')
+  if (strlen(pathname) == 1 && pathname[0] != '/') {
     return NULL;
-  if (strlen(pathname) == 1 && pathname[0] == '/') { 
+  }
+  if (strlen(pathname) == 1 && pathname[0] == '/') {
     return index_nodes; // Points to root index node
   }
   
@@ -517,6 +521,7 @@ static index_node_t *get_index_node(const char *pathname)
   strncpy(pathname_copy, pathname, strlen(pathname));
   tokenize = pathname_copy + 1; // skip the first forward slash
 
+  read_lock(&curr->file_lock);
   while ((token = strsep(&tokenize, "/")) != NULL) {
     if (curr->type != DIR || !found_prev_inode) {
       //printk("Breaking out\n");
@@ -529,20 +534,35 @@ static index_node_t *get_index_node(const char *pathname)
       //printk("Comparing to %s\n", dir_entry->filename);
       if (strncmp(dir_entry->filename, token, MAX_FILE_NAME_LEN) == 0) {
 	found_prev_inode = true;
+	prev = curr;
 	curr = INODE_PTR(dir_entry->index_node_number);
+	read_lock(&curr->file_lock);
+	read_unlock(&prev->file_lock);
 	break;
       } 
     }
   } 
   kfree(pathname_copy);
-  return (token == NULL && found_prev_inode ? curr : NULL);
+  if (!(token == NULL && found_prev_inode)) {
+    read_unlock(&curr->file_lock); //curr is not the droids we're looking for
+    return NULL;
+  } else
+    return curr;
 }
 
+/*
+  To be called -only- on behalf of processes that have already opened
+  the index node corresponding to the given index (that is, the returned
+  index node does not come read-locked
+ */
 static index_node_t *get_inode(size_t index)
 {
   return (index_node_t *)(((void*)index_nodes) + INODE_SZ * index);
 }
 
+/*
+ * Intended to be called with write lock held!
+ */
 static void *extend_inode(index_node_t *inode)
 {
   void *extending_block;
@@ -620,6 +640,7 @@ static void *extend_inode(index_node_t *inode)
   return extending_block;
 }
 
+/* Intended to be called with readlock held */
 static directory_entry_t* get_directory_entry(index_node_t* inode, int index)
 {
   if (inode->type != DIR || inode->size / DIR_ENTRY_SZ <= index) {
@@ -705,12 +726,14 @@ int rd_init()
 					  .num_free_inodes = NUM_BLKS_INODE*BLK_SZ/INODE_SZ};
   const index_node_t root_inode = { .type = DIR,
 				    .size = 0,
+				    .open_count = 0,
 				    .file_lock = RW_LOCK_UNLOCKED,
 				    .direct = { NULL },
 				    .single_indirect = NULL,
 				    .double_indirect = NULL};
   const index_node_t regular_inode = { .type = UNALLOCATED,
 				    .size = 0,
+				    .open_count = 0,
 				    .file_lock = RW_LOCK_UNLOCKED,
 				    .direct = { NULL },
 				    .single_indirect = NULL,
@@ -746,6 +769,8 @@ int rd_init()
 /*
  * Returns the address of the offset'th byte (0 indexed)
  * of the data associated with inode or NULL on error
+ *
+ * Intended to be called with readlock held
  */
 static void *get_byte_address(index_node_t *inode, int offset)
 {
@@ -776,14 +801,6 @@ static void *get_byte_address(index_node_t *inode, int offset)
 
 static int rd_creat(const char *usr_str)
 {
-  const index_node_t new_index_node = {
-    .type = REG,
-    .size = 0,
-    .file_lock = RW_LOCK_UNLOCKED,
-    .direct = { NULL },
-    .single_indirect = NULL,
-    .double_indirect = NULL
-  };
   directory_entry_t new_directory_entry = {
     .filename = { '\0' },
     .index_node_number = 0
@@ -798,51 +815,54 @@ static int rd_creat(const char *usr_str)
     return -1;
   strncpy_from_user(pathname, usr_str, usr_str_len);
 
-  index_node_t *parent = get_parent_index_node(pathname);
-  if (parent == NULL || parent->type != DIR) {
+  index_node_t *parent = get_readlocked_parent_index_node(pathname);
+  if (parent == NULL) {
+    kfree(pathname);
+    return -EINVAL;
+  } else if (parent->type != DIR || parent->size >= MAX_FILE_SIZE) {
+    read_unlock(&parent->file_lock);
     kfree(pathname);
     return -EINVAL;
   }
 
-  if (parent->size >= MAX_FILE_SIZE) {
-    kfree(pathname);
-    return -EFBIG;
-  }
-  /* TODO: get filelock on parent */
   index_node_t *new_inode_ptr = get_free_index_node();
   if (new_inode_ptr == NULL) {
+    read_unlock(&parent->file_lock);
     kfree(pathname);
     return -EFBIG;
   }
+
+  atomic_inc(&parent->open_count); /* Prevent others from unlinking file
+				      while we release readlock/obtain
+				      writelock */
+  read_unlock(&parent->file_lock);
+  write_lock(&new_inode_ptr->file_lock);
+  new_inode_ptr->type = REG;
+  write_lock(&parent->file_lock);
+  atomic_dec(&parent->open_count);
   /* Link to new index node in parent */
-  *new_inode_ptr = new_index_node;
   directory_entry_t *entry = NULL;
   if (parent->size % BLK_SZ == 0) {
     entry = (directory_entry_t *) extend_inode(parent);
-    if (entry == NULL) {
-      kfree(pathname);
-      return -EFBIG;
-    }
   } else {
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
   }
+  if (entry == NULL) {
+    write_unlock(&parent->file_lock);
+    kfree(pathname);
+    return -EFBIG;
+  }
+  
   entry->index_node_number = ((void *) new_inode_ptr - (void *)index_nodes) / INODE_SZ;
   strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
   parent->size += DIR_ENTRY_SZ;
+  write_unlock(&parent->file_lock);
   kfree(pathname);
   return 0;
 }
 
 static int rd_mkdir(const char *usr_str)
 {
-  const index_node_t new_index_node = {
-    .type = DIR,
-    .size = 0,
-    .file_lock = RW_LOCK_UNLOCKED,
-    .direct = { NULL },
-    .single_indirect = NULL,
-    .double_indirect = NULL
-  };
   directory_entry_t new_directory_entry = {
     .filename = { '\0' },
     .index_node_number = 0
@@ -857,44 +877,55 @@ static int rd_mkdir(const char *usr_str)
     return -1;
   strncpy_from_user(pathname, usr_str, usr_str_len);
 
-  index_node_t *parent = get_parent_index_node(pathname);
-  if (parent == NULL || parent->type != DIR) {
+  index_node_t *parent = get_readlocked_parent_index_node(pathname);
+  if (parent == NULL) {
+    kfree(pathname);
+    return -EINVAL;
+  } else if (parent->type != DIR || parent->size >= MAX_FILE_SIZE) {
+    read_unlock(&parent->file_lock);
     kfree(pathname);
     return -EINVAL;
   }
 
-  if (parent->size >= MAX_FILE_SIZE) {
-    kfree(pathname);
-    return -EFBIG;
-  }
-  /* TODO: get filelock on parent */
   index_node_t *new_inode_ptr = get_free_index_node();
   if (new_inode_ptr == NULL) {
+    read_unlock(&parent->file_lock);
     kfree(pathname);
     return -EFBIG;
   }
+
+  atomic_inc(&parent->open_count); /* Prevent others from unlinking file
+				      while we release readlock/obtain
+				      writelock */
+  read_unlock(&parent->file_lock);
+  write_lock(&new_inode_ptr->file_lock);
+  new_inode_ptr->type = DIR;
+  write_lock(&parent->file_lock);
+  atomic_dec(&parent->open_count);
   /* Link to new index node in parent */
-  *new_inode_ptr = new_index_node;
   directory_entry_t *entry = NULL;
   if (parent->size % BLK_SZ == 0) {
     entry = (directory_entry_t *) extend_inode(parent);
-    if (entry == NULL) {
-      kfree(pathname);
-      return -EFBIG;
-    }
   } else {
     entry = get_directory_entry(parent, parent->size / DIR_ENTRY_SZ - 1) + 1;
   }
+  if (entry == NULL) {
+    write_unlock(&parent->file_lock);
+    kfree(pathname);
+    return -EFBIG;
+  }
+  
   entry->index_node_number = ((void *) new_inode_ptr - (void *)index_nodes) / INODE_SZ;
   strncpy(entry->filename, strrchr(pathname, '/') + 1, MAX_FILE_NAME_LEN);
   parent->size += DIR_ENTRY_SZ;
+  write_unlock(&parent->file_lock);
   kfree(pathname);
   return 0;
 }
 
 static int rd_unlink(const char *usr_str)
 {	
-  int i, indirect_block_num = 0, dir_block_num = 0;
+  int i = 0, indirect_block_num = 0, dir_block_num = 0, open_count = 0;
   char *pathname = NULL;
   size_t usr_strlen = strlen_user(usr_str);
   index_node_t *node = NULL;
@@ -906,54 +937,62 @@ static int rd_unlink(const char *usr_str)
   if (pathname[usr_strlen-1] == '/')
     pathname[usr_strlen-1] = '\0';
 
-  index_node_t *parent_node = get_parent_index_node(pathname);
-  /* TODO: get writelock for both parent and node */
-  if (parent_node != NULL) {
-    int last_entry_index = parent_node->size / DIR_ENTRY_SZ - 1;
-    const char *filename = strrchr(pathname, '/') + 1;
-    for (i = 0; i <= last_entry_index; ++i) {
-      directory_entry_t *entry = get_directory_entry(parent_node, i);
-      if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) {
-	node = get_inode(entry->index_node_number);
-	if (node->type == DIR) {
-	  if (node->size != 0) {
-	    kfree(pathname);
-	    return -EINVAL;
-	  }
-	} else {
-	  /* Release all datablocks */
-	  int num_blocks = node->size/ BLK_SZ;
-	  void *block_to_release = NULL;
-	  while (num_blocks != 0) {
-	    block_to_release = get_byte_address(node, (num_blocks - 1) * BLK_SZ);
-	    release_data_block(block_to_release);
-	    num_blocks--;
-	  }
-	  if (node->double_indirect != NULL) {
-	    /* Need to release the double indirect block,
-	       and the single indirect blocks pointed to from it */
-	    for (indirect_block_num = 0; indirect_block_num < PTRS_PB; indirect_block_num++) {
-	      if (node->double_indirect->indirect_blocks[indirect_block_num] != NULL)
-		release_data_block(node->double_indirect->indirect_blocks[indirect_block_num]);
-	    }
-	    release_data_block(node->double_indirect);
-	    node->double_indirect = NULL;
-	  }
-	  if (node->single_indirect != NULL)
-	    release_data_block(node->single_indirect);
+  index_node_t *parent_node = get_readlocked_parent_index_node(pathname);
+  if (parent_node == NULL) {
+    kfree(pathname);
+    return -EINVAL;
+  }
+  atomic_inc(&parent_node->open_count);
+  read_unlock(&parent_node->file_lock);
+  write_lock(&parent_node->file_lock);
+  atomic_dec(&parent_node->open_count);
+  
+  int last_entry_index = parent_node->size / DIR_ENTRY_SZ - 1;
+  const char *filename = strrchr(pathname, '/') + 1;
+  for (i = 0; i <= last_entry_index; ++i) {
+    directory_entry_t *entry = get_directory_entry(parent_node, i);
+    if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) {
+      node = get_inode(entry->index_node_number);
+      if (!write_trylock(&node->file_lock)) {
+	write_unlock(&parent_node->file_lock);
+	kfree(pathname);
+	return -EINVAL;
+      } else if (atomic_read(&node->open_count) > 0) {
+	write_unlock(&parent_node->file_lock);
+	write_unlock(&node->file_lock);
+	kfree(pathname);
+	return -EINVAL;
+      }
+      if (node->type == DIR) {
+	if (node->size != 0) {
+	  write_unlock(&parent_node->file_lock);
+	  kfree(pathname);
+	  return -EINVAL;
 	}
+      } else {
+	/* Release all datablocks */
+	int num_blocks = node->size/ BLK_SZ;
+	void *block_to_release = NULL;
+	while (num_blocks != 0) {
+	  block_to_release = get_byte_address(node, (num_blocks - 1) * BLK_SZ);
+	  release_data_block(block_to_release);
+	  num_blocks--;
+	}
+	if (node->double_indirect != NULL) {
+	  /* Need to release the double indirect block,
+	     and the single indirect blocks pointed to from it */
+	  for (indirect_block_num = 0; indirect_block_num < PTRS_PB; indirect_block_num++) {
+	    if (node->double_indirect->indirect_blocks[indirect_block_num] != NULL)
+	      release_data_block(node->double_indirect->indirect_blocks[indirect_block_num]);
+	  }
+	  release_data_block(node->double_indirect);
+	  node->double_indirect = NULL;
+	}
+	if (node->single_indirect != NULL)
+	  release_data_block(node->single_indirect);
+      }
 				
-	// Init node
-	//	memset(node, 0, INODE_SZ);
-	const index_node_t clean_inode = { .type = UNALLOCATED,
-				    .size = 0,
-				    .file_lock = RW_LOCK_UNLOCKED,
-				    .direct = { NULL },
-				    .single_indirect = NULL,
-				    .double_indirect = NULL};
-	*node = clean_inode;
-	
-	// Delete Entry
+	// Delete Entry In parent
 	directory_entry_t *last_entry = get_directory_entry(parent_node, last_entry_index);
 	if (entry != last_entry)
 	  *entry = *last_entry;
@@ -964,7 +1003,6 @@ static int rd_unlink(const char *usr_str)
 	  if (parent_node->size / BLK_SZ < DIRECT) {
 	    parent_node->direct[parent_node->size / BLK_SZ] = NULL;
 	  } else if (parent_node->size / BLK_SZ < DIRECT + PTRS_PB) { // IF more than 8
-	    // TODO
 	    if (parent_node->size / BLK_SZ == DIRECT) {
 	      /* Need to also release the indirect block */
 	      release_data_block(parent_node->single_indirect);
@@ -1018,11 +1056,21 @@ static int rd_unlink(const char *usr_str)
 	break;
       }
     }
-  } 
-  kfree(pathname);
+  write_unlock(&parent_node->file_lock);
   if (node == NULL) {// Couldn't find an inode for this pathname
     return -EINVAL;
   }
+
+  // Init node
+  node->type = UNALLOCATED;
+  node->size = 0;
+  atomic_set(&node->open_count, 0);
+  for (i = 0; i < DIRECT; i++)
+    node->direct[i] = NULL;
+  node->single_indirect = NULL;
+  node->double_indirect = NULL;
+  write_unlock(&node->file_lock);
+  kfree(pathname);
   spin_lock(&super_block_spinlock);
   super_block->num_free_inodes++;
   spin_unlock(&super_block_spinlock);
@@ -1043,10 +1091,11 @@ static int rd_open(const pid_t pid, const char *usr_str)
   if (usr_strlen > 2 && pathname[usr_strlen-1] == '/')
     pathname[usr_strlen-1] = '\0';
   
-  index_node_t *node = get_index_node(pathname);
+  index_node_t *node = get_readlocked_index_node(pathname);
   kfree(pathname);
   if (node == NULL)
     return -EINVAL;
+  atomic_inc(&node->open_count);
   file_object_t new_fo = {
     .index_node = node,
     .file_position = 0
@@ -1055,10 +1104,13 @@ static int rd_open(const pid_t pid, const char *usr_str)
   if (fdt == NULL)
     fdt = create_file_descriptor_table(pid);
   if (fdt == NULL) {
+    atomic_dec(&node->open_count);
     //printk("Failed to create fdt for process %d\n", pid);
     return -1;
   }
   ret = create_file_descriptor_table_entry(fdt, new_fo);
+  if (ret < 0)
+    atomic_dec(&node->open_count);
   return ret;
 }
 
@@ -1068,6 +1120,10 @@ static int rd_close(const pid_t pid, const int fd)
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   if (fdt == NULL) {
     return -EINVAL;
+  }
+  file_object_t fo = get_file_descriptor_table_entry(pid, fd);
+  if (fo.index_node != NULL) {
+    atomic_dec(&fo.index_node->open_count);
   }
   return delete_file_descriptor_table_entry(fdt, fd);
 }
