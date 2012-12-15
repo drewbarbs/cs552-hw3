@@ -146,50 +146,11 @@ int main(int argc, char *argv[])
   FILE *fl;
   rd_init();
 
-  rd_mkdir("/hello");
-  fl = fopen("out.lis", "wt");
-  //  for (i = 0; i < 16 * (8 + 64 + 64*64); i++) {
-    for (i = 0; i < 1025; i++) {
-    sprintf(pathname, "/hello/file%d", i);
-    fprintf(fl, "%d\n", rd_mkdir(pathname));
-  }
+  handle = rd_open("/");
   
-  if (((handle = rd_open("/hello")) < 0)){
-    perror("Open\n");
-    exit(1);
+  for (i = 0; i < 600; i++) {
+    printf("%d %s | ", rd_readdir(handle, buf), buf);
   }
-
-  /* //  for (i = 0; i < 16 * (8 + 64 + 64*64); i++) { */
-  for (i = 0; i < 1025; i++) {
-    fprintf(fl, "%d %s | ", rd_readdir(handle, buf), buf);
-  }
-
-  fprintf(fl, "\n\n**** CLOSING FILE: %d *** \n\n", rd_close(handle));
-  fprintf(fl, "\n\n**** UNLINKING FILES *** \n\n");
-
-  for (i = 0; i < 1025; i++) {
-    sprintf(pathname, "/hello/file%d", i);
-    fprintf(fl, "%d\n", rd_unlink(pathname));
-  }
-
-  fprintf(fl, "\n\n**** DOING IT AGAIN *** \n\n");
-
-    for (i = 0; i < 1025; i++) {
-    sprintf(pathname, "/hello/file%d", i);
-    fprintf(fl, "%d\n", rd_mkdir(pathname));
-  }
-  
-  if (((handle = rd_open("/hello")) < 0)){
-    perror("Open\n");
-    exit(1);
-  }
-
-  /* //  for (i = 0; i < 16 * (8 + 64 + 64*64); i++) { */
-  for (i = 0; i < 1025; i++) {
-    fprintf(fl, "%d %s | ", rd_readdir(handle, buf), buf);
-  }
-  
-  fclose(fl);
 
   return 0;
 }

@@ -182,7 +182,7 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
 			 unsigned int cmd, unsigned long arg) 
 {
   offset_info_t offset_info;
-  printk(KERN_INFO "Called ioctl\n");
+  //  printk(KERN_INFO "Called ioctl\n");
   if (cmd != RD_INIT && !rd_initialized()) {
     printk(KERN_ERR "Ramdisk called before being initialized\n");
     return -1;
@@ -725,7 +725,7 @@ bool rd_initialized()
 int rd_init()
 {
   const super_block_t init_super_block = {.num_free_blocks = NUM_BLKS_DATA,
-					  .num_free_inodes = NUM_BLKS_INODE*BLK_SZ/INODE_SZ};
+					  .num_free_inodes = NUM_BLKS_INODE*BLK_SZ/INODE_SZ - 1};
   const index_node_t root_inode = { .type = DIR,
 				    .size = 0,
 				    .open_count = ATOMIC_INIT(0),
@@ -765,6 +765,8 @@ int rd_init()
    *inode = regular_inode;
   }
   write_unlock(&rd_init_rwlock);
+  printk("Num data_block at init: %d\n", super_block->num_free_blocks);
+  printk("Num inodes at init: %d\n", super_block->num_free_inodes);
   return 0;
 }
 
