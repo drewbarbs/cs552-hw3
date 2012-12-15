@@ -940,6 +940,7 @@ static int rd_unlink(const char *usr_str)
   if (pathname[usr_strlen-1] == '/')
     pathname[usr_strlen-1] = '\0';
 
+  printk("Starting unlink\n");
   index_node_t *parent_node = get_readlocked_parent_index_node(pathname);
   if (parent_node == NULL) {
     kfree(pathname);
@@ -949,7 +950,8 @@ static int rd_unlink(const char *usr_str)
   read_unlock(&parent_node->file_lock);
   write_lock(&parent_node->file_lock);
   atomic_dec(&parent_node->open_count);
-  
+  printk("Got writelock on parent\n");
+
   int last_entry_index = parent_node->size / DIR_ENTRY_SZ - 1;
   const char *filename = strrchr(pathname, '/') + 1;
   for (i = 0; i <= last_entry_index; ++i) {
