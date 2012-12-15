@@ -728,14 +728,14 @@ int rd_init()
 					  .num_free_inodes = NUM_BLKS_INODE*BLK_SZ/INODE_SZ};
   const index_node_t root_inode = { .type = DIR,
 				    .size = 0,
-				    .open_count = 0,
+				    .open_count = ATOMIC_INIT(0),
 				    .file_lock = RW_LOCK_UNLOCKED,
 				    .direct = { NULL },
 				    .single_indirect = NULL,
 				    .double_indirect = NULL};
   const index_node_t regular_inode = { .type = UNALLOCATED,
 				    .size = 0,
-				    .open_count = 0,
+			       .open_count = ATOMIC_INIT(0),
 				    .file_lock = RW_LOCK_UNLOCKED,
 				    .direct = { NULL },
 				    .single_indirect = NULL,
