@@ -1130,7 +1130,7 @@ static int rd_close(const pid_t pid, const int fd)
   if (fdt == NULL) {
     return -EINVAL;
   }
-  file_object_t fo = get_file_descriptor_table_entry(pid, fd);
+  file_object_t fo = get_file_descriptor_table_entry(fdt, fd);
   printk("about to decrement open_count");
   if (fo.index_node != NULL) {
     atomic_dec(&fo.index_node->open_count);
