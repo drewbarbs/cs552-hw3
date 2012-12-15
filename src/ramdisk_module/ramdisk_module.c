@@ -182,7 +182,7 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
 			 unsigned int cmd, unsigned long arg) 
 {
   offset_info_t offset_info;
-  //printk(KERN_INFO "Called ioctl\n");
+  printk(KERN_INFO "Called ioctl\n");
   if (cmd != RD_INIT && !rd_initialized()) {
     printk(KERN_ERR "Ramdisk called before being initialized\n");
     return -1;
@@ -1142,7 +1142,7 @@ static int rd_close(const pid_t pid, const int fd)
 static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 {
   rd_rwfile_arg_t *read_arg = NULL;
-  unsigned long data_left_to_read = 0,
+  unsigned long amt_requested = 0, data_left_to_read = 0,
     bytes_until_end_of_block = 0,
     bytes_left_in_file = 0,
     amt_to_be_read_at_address = 0,
@@ -1165,7 +1165,8 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     kfree(read_arg);
     return -EINVAL;
   }
-  data_left_to_read  = read_arg->num_bytes;
+  amt_requested = read_arg->num_bytes;
+  data_left_to_read  = amt_requested;
   dest = read_arg->address;
   file_object_t fo = get_file_descriptor_table_entry(fdt, read_arg->fd);
   if (fo.index_node == NULL || fo.index_node->type != REG) {
@@ -1194,14 +1195,13 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     if (num_not_copied > 0) break;
   }
   set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
-  kfree(read_arg);
-  return read_arg->num_bytes - data_left_to_read;
+  return amt_requested - data_left_to_read;
 }
 
 static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 {
   rd_rwfile_arg_t *write_arg = NULL;
-  unsigned long data_left_to_write = 0,
+  unsigned long amt_requested = 0, data_left_to_write = 0,
     amt_to_copy = 0,
     space_available_at_dest = 0,
     num_copied = 0,
@@ -1222,7 +1222,8 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     kfree(write_arg);
     return -EINVAL;
   }
-  data_left_to_write  = write_arg->num_bytes;
+  amt_requested = write_arg->num_bytes;
+  data_left_to_write  = amt_requested;
   from = write_arg->address;
   file_object_t fo = get_file_descriptor_table_entry(fdt, write_arg->fd);
   if (fo.index_node == NULL || fo.index_node->type != REG) {
@@ -1269,7 +1270,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   }
   set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
   kfree(write_arg);
-  return write_arg->num_bytes - data_left_to_write;
+  return amt_requested - data_left_to_write;
   
 }
 
