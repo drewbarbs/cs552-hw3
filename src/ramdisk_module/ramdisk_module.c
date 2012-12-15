@@ -977,6 +977,7 @@ static int rd_unlink(const char *usr_str)
 	if (node->size != 0) {
 	  printk("Case 3\n");
 	  write_unlock(&parent_node->file_lock);
+	  write_unlock(&node->file_lock);
 	  kfree(pathname);
 	  return -EINVAL;
 	}
@@ -1121,8 +1122,9 @@ static int rd_open(const pid_t pid, const char *usr_str)
     return -1;
   }
   ret = create_file_descriptor_table_entry(fdt, new_fo);
-  if (ret < 0)
+  if (ret < 0) {
     atomic_dec(&node->open_count);
+  }
   read_unlock(&node->file_lock);
   return ret;
 }
