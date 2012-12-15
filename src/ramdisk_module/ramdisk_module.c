@@ -138,7 +138,6 @@ static int __init initialization_routine(void) {
   printk(KERN_INFO "Loading ramdisk module\n");
   ramdisk_file_ops.ioctl = ramdisk_ioctl;
   
-
   /* Start create proc entry */
   proc_entry = create_proc_entry("ramdisk", 0444, NULL);
   if(!proc_entry) {
@@ -783,7 +782,6 @@ static void *get_byte_address(index_node_t *inode, int offset)
   
   data_block_num = offset / BLK_SZ; // integer divison
   offset_into_block = offset % BLK_SZ;
-  read_lock(&inode->file_lock);
   
   if (data_block_num < DIRECT) {
     block_start_address = inode->direct[data_block_num];
@@ -797,7 +795,6 @@ static void *get_byte_address(index_node_t *inode, int offset)
 						    data[indirect_block_num];
   }
   offset_address = block_start_address + offset_into_block;
-  read_unlock(&inode->file_lock);
   return offset_address;
 }
 
