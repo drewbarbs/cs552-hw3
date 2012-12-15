@@ -808,6 +808,7 @@ static int rd_creat(const char *usr_str)
   };
   char *pathname = NULL;
   size_t usr_str_len = strlen_user(usr_str);
+  index_node_t *existing_node = NULL;
 
   if (usr_str_len <= 2 || !access_ok(VERIFY_READ, usr_str, MAX_FILE_NAME_LEN))
     return -EINVAL;
@@ -815,6 +816,12 @@ static int rd_creat(const char *usr_str)
   if (pathname == NULL) 
     return -1;
   strncpy_from_user(pathname, usr_str, usr_str_len);
+  
+  existing_node = get_readlocked_index_node(pathname);
+  if (existing_node != NULL) {
+    read_unlock(&existing_node->file_lock);
+    return -EEXIST;
+  }
 
   index_node_t *parent = get_readlocked_parent_index_node(pathname);
   if (parent == NULL) {
@@ -872,6 +879,7 @@ static int rd_mkdir(const char *usr_str)
   };
   char *pathname = NULL;
   size_t usr_str_len = strlen_user(usr_str);
+  index_node_t *existing_node = NULL;
 
   if (usr_str_len <= 2 || !access_ok(VERIFY_READ, usr_str, MAX_FILE_NAME_LEN))
     return -EINVAL;
@@ -879,6 +887,12 @@ static int rd_mkdir(const char *usr_str)
   if (pathname == NULL) 
     return -1;
   strncpy_from_user(pathname, usr_str, usr_str_len);
+
+  existing_node = get_readlocked_index_node(pathname);
+  if (existing_node != NULL) {
+    read_unlock(&existing_node->file_lock);
+    return -EEXIST;
+  }
 
   index_node_t *parent = get_readlocked_parent_index_node(pathname);
   if (parent == NULL) {

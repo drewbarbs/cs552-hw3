@@ -140,17 +140,19 @@ int rd_readdir(int fd, char *address)
 #ifdef DEBUG
 int main(int argc, char *argv[])
 {
-  char pathname[80] = {'\0'};
-  char buf[80] = {'\0'};
-  int i = 0, handle = -1;
-  FILE *fl;
-  rd_init();
 
-  handle = rd_open("/");
+  printf("%d\n", rd_unlink("/dir1/dir2"));
+  /* char pathname[80] = {'\0'}; */
+  /* char buf[80] = {'\0'}; */
+  /* int i = 0, handle = -1; */
+  /* FILE *fl; */
+  /* rd_init(); */
+
+  /* handle = rd_open("/"); */
   
-  for (i = 0; i < 600; i++) {
-    printf("%d %s | ", rd_readdir(handle, buf), buf);
-  }
+  /* for (i = 0; i < 600; i++) { */
+  /*   printf("%d %s | ", rd_readdir(handle, buf), buf); */
+  /* } */
 
   return 0;
 }
