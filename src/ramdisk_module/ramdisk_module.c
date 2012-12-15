@@ -207,6 +207,7 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   case RD_LSEEK:
     return rd_lseek(current->pid, (rd_seek_arg_t *) arg);
   case RD_UNLINK:
+    printk("About to call rd_unlink\n");
     return rd_unlink((char *) arg);
   case RD_READDIR:
     return rd_readdir(current->pid, (rd_readdir_arg_t *) arg);
@@ -1130,9 +1131,11 @@ static int rd_close(const pid_t pid, const int fd)
     return -EINVAL;
   }
   file_object_t fo = get_file_descriptor_table_entry(pid, fd);
+  printk("about to decrement open_count");
   if (fo.index_node != NULL) {
     atomic_dec(&fo.index_node->open_count);
   }
+  printk("About to return result of delete fdt\n");
   return delete_file_descriptor_table_entry(fdt, fd);
 }
 
