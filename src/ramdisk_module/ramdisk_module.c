@@ -955,7 +955,6 @@ static int rd_unlink(const char *usr_str)
   read_unlock(&parent_node->file_lock);
   write_lock(&parent_node->file_lock);
   atomic_dec(&parent_node->open_count);
-  printk("Got writelock on parent\n");
 
   int last_entry_index = parent_node->size / DIR_ENTRY_SZ - 1;
   const char *filename = strrchr(pathname, '/') + 1;
@@ -1074,7 +1073,6 @@ static int rd_unlink(const char *usr_str)
     return -EINVAL;
   }
 
-  printk("Finished main logic of unlinking\n");
   // Init node
   node->type = UNALLOCATED;
   node->size = 0;
@@ -1179,13 +1177,19 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   data_left_to_read  = amt_requested;
   dest = read_arg->address;
   file_object_t fo = get_file_descriptor_table_entry(fdt, read_arg->fd);
-  if (fo.index_node == NULL || fo.index_node->type != REG) {
+  if (fo.index_node == NULL) {
     kfree(read_arg);
     return -EINVAL;
   }
   
+  read_lock(&fo.index_node->file_lock);
+
+  if (fo.index_node->type != REG) {
+    read_unlock(&fo.index_node->file_lock);
+  }
+
   inode = fo.index_node;
-  printk("About to read\n");
+
   /* Read data */
   while (data_left_to_read > 0) {
     if (fo.file_position == inode->size) // file_position is at EOF
@@ -1205,6 +1209,8 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     if (num_not_copied > 0) break;
   }
   set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
+  read_unlock(&fo.index_node->file_lock);
+  kfree(read_arg);
   return amt_requested - data_left_to_read;
 }
 
@@ -1236,11 +1242,23 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   data_left_to_write  = amt_requested;
   from = write_arg->address;
   file_object_t fo = get_file_descriptor_table_entry(fdt, write_arg->fd);
-  if (fo.index_node == NULL || fo.index_node->type != REG) {
+  if (fo.index_node == NULL) {  
     kfree(write_arg);
     return -EINVAL;
   }
+  
   inode = fo.index_node;
+
+  if (!write_trylock(&inode->file_lock)) {
+    kfree(write_arg);
+    return -EINVAL;
+  }
+
+  if (inode->type != REG) {
+    write_unlock(&inode->file_lock);
+    kfree(write_arg);
+    return -EINVAL;
+  }
 
   /* Write data */
   while (data_left_to_write > 0) {
@@ -1279,6 +1297,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     if (num_not_copied > 0) break;
   }
   set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
+  write_unlock(&inode->file_lock);
   kfree(write_arg);
   return amt_requested - data_left_to_write;
   
@@ -1304,13 +1323,19 @@ static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg)
   }
 
   file_object_t fo = get_file_descriptor_table_entry(fdt, seek_arg->fd);
-  if (fo.index_node == NULL || fo.index_node->type != REG ||
-      seek_arg->offset > fo.index_node->size) {
+  if (fo.index_node == NULL) {
     kfree(seek_arg);
+    return -EINVAL;
+  }
+  read_lock(&fo.index_node->file_lock);
+  if(fo.index_node->type != REG ||
+      seek_arg->offset > fo.index_node->size) {
+    read_unlock(&fo.index_node->file_lock);
     return -EINVAL;
   }
   fo.file_position = seek_arg->offset;
   set_file_descriptor_table_entry(fdt, seek_arg->fd, fo);
+  read_unlock(&fo.index_node->file_lock);
   kfree(seek_arg);
   return 0;
 }
