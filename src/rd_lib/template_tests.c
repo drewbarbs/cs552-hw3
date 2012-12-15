@@ -54,6 +54,9 @@ int main () {
   int fd;
   int index_node_number;
   
+  FILE *outputfile;
+  outputfile = fopen("outputfile.txt", "wt");
+
   /* Some arbitrary data for our files */
   memset (data1, '1', sizeof (data1));
   memset (data2, '2', sizeof (data2));
@@ -190,7 +193,7 @@ int main () {
     exit (1);
   }
   /* Should be all 1s here... */
-  printf ("Data at addr: %s\n", addr);
+  fprintf (outputfile, "Data at addr: %s\n", addr);
 
 #ifdef TEST_SINGLE_INDIRECT
 
@@ -204,7 +207,7 @@ int main () {
     exit (1);
   }
   /* Should be all 2s here... */
-  printf ("Data at addr: %s\n", addr);
+  fprintf (outputfile, "Data at addr: %s\n", addr);
 
 #ifdef TEST_DOUBLE_INDIRECT
 
@@ -218,11 +221,13 @@ int main () {
     exit (1);
   }
   /* Should be all 3s here... */
-  printf ("Data at addr: %s\n", addr);
+  fprintf (outputfile, "Data at addr: %s\n", addr);
 
 #endif // TEST_DOUBLE_INDIRECT
 
 #endif // TEST_SINGLE_INDIRECT
+
+  fclose(outputfile);
 
   /* Close the bigfile */
   retval = rd_close (fd);
