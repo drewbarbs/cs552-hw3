@@ -1291,6 +1291,8 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -EINVAL;
   }
 
+  printk("Got lock\n");
+
   if (inode->type != REG) {
     write_unlock(&inode->file_lock);
     kfree(write_arg);
@@ -1376,6 +1378,7 @@ static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg)
   fo.file_position = seek_arg->offset;
   set_file_descriptor_table_entry(fdt, seek_arg->fd, fo);
   read_unlock(&fo.index_node->file_lock);
+  printk("Releasing lock\n");
   kfree(seek_arg);
   return 0;
 }
