@@ -1152,7 +1152,7 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   if (fdt == NULL)
     return -1;
-  
+  printk("About to copy from user\n");
   /* Copy argument from user space, check validity */
   read_arg = kcalloc(1, sizeof(rd_rwfile_arg_t), GFP_KERNEL);
   if (read_arg == NULL)
@@ -1169,8 +1169,9 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     kfree(read_arg);
     return -EINVAL;
   }
+  
   inode = fo.index_node;
-
+  printk("About to read\n");
   /* Read data */
   while (data_left_to_read > 0) {
     if (fo.file_position == inode->size) // file_position is at EOF
