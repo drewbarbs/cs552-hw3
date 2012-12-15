@@ -1159,22 +1159,19 @@ static int rd_close(const pid_t pid, const int fd)
   return delete_file_descriptor_table_entry(fdt, fd);
 }
 
-/* static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg) */
-/* { */
-  
-/* } */
-
 static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 {
   rd_rwfile_arg_t *read_arg = NULL;
-  unsigned long amt_requested = 0, data_left_to_read = 0,
+  unsigned long amt_requested = 0,
+    amt_fulfillable = 0,
+    data_left_to_read = 0,
     bytes_until_end_of_block = 0,
     bytes_left_in_file = 0,
     amt_to_be_read_at_address = 0,
     amt_to_copy = 0,
     num_copied = 0,
     num_not_copied = 0;
-  void *dest = NULL, *from = NULL;
+  void *dest = NULL, *from = NULL, *data_buf = NULL;
   index_node_t *inode = NULL;
   /* Make sure the process has a file descriptor table */
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
@@ -1190,19 +1187,28 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -EINVAL;
   }
   amt_requested = read_arg->num_bytes;
-  data_left_to_read  = amt_requested;
-  dest = read_arg->address;
+  amt_fulfillable = min(amt_requested, MAX_FILE_SIZE);
+  data_left_to_read  = amt_fulfillable;
   file_object_t fo = get_file_descriptor_table_entry(fdt, read_arg->fd);
   if (fo.index_node == NULL) {
     kfree(read_arg);
     return -EINVAL;
   }
+
+  data_buf = kcalloc(amt_fulfillable, 1, GFP_KERNEL);
+  if (data_buf == NULL) {
+    kfree(read_arg);
+    return -EINVAL;
+  }
+
+  dest = data_buf;//read_arg->address;
   
   read_lock(&fo.index_node->file_lock);
 
   if (fo.index_node->type != REG) {
     read_unlock(&fo.index_node->file_lock);
     kfree(read_arg);
+    kfree(data_buf);
     return -EINVAL;
   }
 
@@ -1219,23 +1225,26 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     amt_to_be_read_at_address = min(bytes_until_end_of_block, bytes_left_in_file);
     amt_to_copy = min(amt_to_be_read_at_address, data_left_to_read);
 				    
-    num_not_copied = copy_to_user(dest, from, amt_to_copy);
-    num_copied = amt_to_copy - num_not_copied;
+    //    num_not_copied = copy_to_user(dest, from, amt_to_copy);
+    memcpy(dest, from, amt_to_copy);
+    num_copied = amt_to_copy;// - num_not_copied;
     data_left_to_read -= num_copied;
     dest += num_copied;
     fo.file_position += num_copied;
     if (num_not_copied > 0) break;
   }
-  set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
   read_unlock(&fo.index_node->file_lock);
+  set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
+  copy_to_user(read_arg, data_buf, amt_requested - data_left_to_read);
   kfree(read_arg);
+  kfree(data_buf);
   return amt_requested - data_left_to_read;
 }
 
 static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
 {
   rd_rwfile_arg_t *write_arg = NULL;
-  unsigned long amt_requested = 0, data_left_to_write = 0,
+  unsigned long amt_requested = 0, amt_fulfillable = 0, data_left_to_write = 0,
     amt_to_copy = 0,
     space_available_at_dest = 0,
     num_copied = 0,
@@ -1258,7 +1267,8 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   }
     
   amt_requested = write_arg->num_bytes;
-  data_left_to_write  = amt_requested;
+  amt_fulfillable = min(amt_requested, MAX_FILE_SIZE);
+  data_left_to_write  = amt_fulfillable;
 
   file_object_t fo = get_file_descriptor_table_entry(fdt, write_arg->fd);
   if (fo.index_node == NULL) {  
@@ -1266,14 +1276,14 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -EINVAL;
   }
   
-  data_buf = kcalloc(amt_requested, 1, GFP_KERNEL);
+  data_buf = kcalloc(amt_fulfillable, 1, GFP_KERNEL);
   if (data_buf == NULL) {
     printk(KERN_ERR "Couldn't calloc buffer for write\n");
     kfree(write_arg);
     return -EFBIG;
   }
   
-  num_not_copied = copy_from_user(data_buf, write_arg->address, amt_requested);
+  num_not_copied = copy_from_user(data_buf, write_arg->address, amt_fulfillable);
   if (num_not_copied > 0) {
     printk(KERN_ERR "Couldnt buffer the %d bytes requested to be written\n", amt_requested);
     kfree(write_arg);
@@ -1290,8 +1300,6 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     kfree(data_buf);
     return -EINVAL;
   }
-
-  printk("%d Got lock\n", current->pid);
 
   if (inode->type != REG || inode->size == MAX_FILE_SIZE) {
     write_unlock(&inode->file_lock);
@@ -1338,11 +1346,10 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     if (num_not_copied > 0) break;
   }
   write_unlock(&inode->file_lock);
-  printk("%d Unlocking\n",current->pid);
   set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
   kfree(data_buf);
   kfree(write_arg);
-  return amt_requested - data_left_to_write;
+  return amt_fulfillable - data_left_to_write;
   
 }
 
@@ -1379,7 +1386,6 @@ static int rd_lseek(const pid_t pid, const rd_seek_arg_t *usr_arg)
   fo.file_position = seek_arg->offset;
   set_file_descriptor_table_entry(fdt, seek_arg->fd, fo);
   read_unlock(&fo.index_node->file_lock);
-  printk("Releasing lock\n");
   kfree(seek_arg);
   return 0;
 }
