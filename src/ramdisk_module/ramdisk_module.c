@@ -962,10 +962,12 @@ static int rd_unlink(const char *usr_str)
     if (strncmp(entry->filename, filename, MAX_FILE_NAME_LEN) == 0) {
       node = get_inode(entry->index_node_number);
       if (!write_trylock(&node->file_lock)) {
+	printk("Case 1\n");
 	write_unlock(&parent_node->file_lock);
 	kfree(pathname);
 	return -EINVAL;
       } else if (atomic_read(&node->open_count) > 0) {
+	printk("Case 2\n");
 	write_unlock(&parent_node->file_lock);
 	write_unlock(&node->file_lock);
 	kfree(pathname);
@@ -973,6 +975,7 @@ static int rd_unlink(const char *usr_str)
       }
       if (node->type == DIR) {
 	if (node->size != 0) {
+	  printk("Case 3\n");
 	  write_unlock(&parent_node->file_lock);
 	  kfree(pathname);
 	  return -EINVAL;
@@ -1114,12 +1117,14 @@ static int rd_open(const pid_t pid, const char *usr_str)
     fdt = create_file_descriptor_table(pid);
   if (fdt == NULL) {
     atomic_dec(&node->open_count);
+    read_unlock(&node->file_lock);
     //printk("Failed to create fdt for process %d\n", pid);
     return -1;
   }
   ret = create_file_descriptor_table_entry(fdt, new_fo);
   if (ret < 0)
     atomic_dec(&node->open_count);
+  read_unlock(&node->file_lock);
   return ret;
 }
 
@@ -1131,11 +1136,9 @@ static int rd_close(const pid_t pid, const int fd)
     return -EINVAL;
   }
   file_object_t fo = get_file_descriptor_table_entry(fdt, fd);
-  printk("about to decrement open_count");
   if (fo.index_node != NULL) {
     atomic_dec(&fo.index_node->open_count);
   }
-  printk("About to return result of delete fdt\n");
   return delete_file_descriptor_table_entry(fdt, fd);
 }
 
