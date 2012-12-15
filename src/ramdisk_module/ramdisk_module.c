@@ -1064,6 +1064,7 @@ static int rd_unlink(const char *usr_str)
     return -EINVAL;
   }
 
+  printk("Finished main logic of unlinking\n");
   // Init node
   node->type = UNALLOCATED;
   node->size = 0;
