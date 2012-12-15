@@ -1291,9 +1291,9 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -EINVAL;
   }
 
-  printk("Got lock\n");
+  printk("%d Got lock\n", current->pid);
 
-  if (inode->type != REG) {
+  if (inode->type != REG || inode->size == MAX_FILE_SIZE) {
     write_unlock(&inode->file_lock);
     kfree(write_arg);
     kfree(data_buf);
@@ -1338,6 +1338,7 @@ static int rd_write(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     if (num_not_copied > 0) break;
   }
   write_unlock(&inode->file_lock);
+  printk("%d Unlocking\n",current->pid);
   set_file_descriptor_table_entry(fdt, write_arg->fd, fo);
   kfree(data_buf);
   kfree(write_arg);
