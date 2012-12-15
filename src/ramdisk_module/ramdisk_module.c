@@ -124,8 +124,10 @@ static int procfs_close(struct inode *inode, struct file *file)
   if (fdt != NULL) {
     for (i = 0; i < fdt->entries_length; i++) {
       fo = get_file_descriptor_table_entry(fdt, i);
-      if (fo.index_node != NULL)
-	read_unlock(&fo.index_node->file_lock);
+      if (fo.index_node != NULL) {
+	printk("Closing open file with fd %d on behalf of %d\n", i, current->pid);
+	atomic_dec(&fo.index_node->open_count);
+      }	
     }
     delete_file_descriptor_table(current->pid);
   }
@@ -1201,7 +1203,7 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
     return -EINVAL;
   }
 
-  dest = data_buf;//read_arg->address;
+  dest = data_buf;
   
   read_lock(&fo.index_node->file_lock);
 
@@ -1235,7 +1237,7 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   }
   read_unlock(&fo.index_node->file_lock);
   set_file_descriptor_table_entry(fdt, read_arg->fd, fo);
-  copy_to_user(read_arg, data_buf, amt_requested - data_left_to_read);
+  copy_to_user(read_arg->address, data_buf, amt_requested - data_left_to_read);
   kfree(read_arg);
   kfree(data_buf);
   return amt_requested - data_left_to_read;
