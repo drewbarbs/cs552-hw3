@@ -207,7 +207,6 @@ static int ramdisk_ioctl(struct inode *inode, struct file *filp,
   case RD_LSEEK:
     return rd_lseek(current->pid, (rd_seek_arg_t *) arg);
   case RD_UNLINK:
-    printk("About to call rd_unlink\n");
     return rd_unlink((char *) arg);
   case RD_READDIR:
     return rd_readdir(current->pid, (rd_readdir_arg_t *) arg);
@@ -1163,7 +1162,6 @@ static int rd_read(const pid_t pid, const rd_rwfile_arg_t *usr_arg)
   file_descriptor_table_t *fdt = get_file_descriptor_table(pid);
   if (fdt == NULL)
     return -1;
-  printk("About to copy from user\n");
   /* Copy argument from user space, check validity */
   read_arg = kcalloc(1, sizeof(rd_rwfile_arg_t), GFP_KERNEL);
   if (read_arg == NULL)
