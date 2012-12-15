@@ -26,7 +26,7 @@
 #define TEST2
 #define TEST3
 #define TEST4
-//#define TEST5
+#define TEST5
 
 // #define's to control whether single indirect or
 // double indirect block pointers are tested
@@ -53,9 +53,6 @@ int main () {
   int retval, i;
   int fd;
   int index_node_number;
-
-  FILE *outputfile;
-  outputfile = fopen("outputfile.txt", "wt");
   
   /* Some arbitrary data for our files */
   memset (data1, '1', sizeof (data1));
@@ -193,7 +190,7 @@ int main () {
     exit (1);
   }
   /* Should be all 1s here... */
-  fprintf (outputfile, "Data at addr: %s\n", addr);
+  printf ("Data at addr: %s\n", addr);
 
 #ifdef TEST_SINGLE_INDIRECT
 
@@ -207,7 +204,7 @@ int main () {
     exit (1);
   }
   /* Should be all 2s here... */
-  fprintf (outputfile, "Data at addr: %s\n", addr);
+  printf ("Data at addr: %s\n", addr);
 
 #ifdef TEST_DOUBLE_INDIRECT
 
@@ -221,9 +218,8 @@ int main () {
     exit (1);
   }
   /* Should be all 3s here... */
-  fprintf (outputfile, "Data at addr: %s\n", addr);
+  printf ("Data at addr: %s\n", addr);
 
-  fclose(outputfile);
 #endif // TEST_DOUBLE_INDIRECT
 
 #endif // TEST_SINGLE_INDIRECT
