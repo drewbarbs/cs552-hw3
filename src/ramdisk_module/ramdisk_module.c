@@ -492,6 +492,7 @@ static index_node_t *get_readlocked_parent_index_node(const char *pathname)
   if (filename == NULL)
     return NULL;
   if (strcmp(filename, pathname) == 0) { // Parent is root node
+    read_lock(&index_nodes->file_lock);
     return index_nodes;
   }
   pathname_copy = (char *) kcalloc(strlen(pathname) + 1, sizeof(char), GFP_KERNEL);
@@ -514,6 +515,7 @@ static index_node_t *get_readlocked_index_node(const char *pathname)
     return NULL;
   }
   if (strlen(pathname) == 1 && pathname[0] == '/') {
+    read_lock(&index_nodes->file_lock);
     return index_nodes; // Points to root index node
   }
   
