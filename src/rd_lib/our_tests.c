@@ -90,7 +90,7 @@ int make_seqfile()
 }
 
 int main () {
-  int retval, fd, i, offset, index_node_number, num_written;  
+  int retval, fd, i, offset;
   char comp;
   
   
